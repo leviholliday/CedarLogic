@@ -4,6 +4,7 @@
 #include <d2d1_1.h>
 #include "Window.h"
 #include "DragLog.h"
+#include "Intro.h"
 #include "SessionCheck.h"
 
 #include <commdlg.h>
@@ -261,19 +262,14 @@ void Prefs::loadFrom(const std::string& path, const std::string* marker) {
 	showTitle = r.b("showTitle", showTitle);
 	showThemeToggle = r.b("showThemeToggle", showThemeToggle);
 	showStepClock = r.b("showStepClock", showStepClock);
-	// The Actions rail: on screen for a new install (no settings at all);
-	// anyone who had CedarLogic before keeps the window they know (no rail,
-	// the toolbar as it was) until they look in Settings > Actions, which a
-	// status line tells them once -- as the Mac decides it.
-	if (r.has("actionsMode")) {
-		actionsMode = r.i("actionsMode", 0, 0, 2);
-		actionsHint = r.b("actionsHint", false);
-	} else {
-		const bool fresh = r.m.empty();
-		actionsMode = fresh ? 0 : 2;
-		actionsHint = !fresh;
-	}
-	actionsCollapsed = r.b("actionsCollapsed", false);
+	// The Actions panel: on for everyone in 0.4, new installs and updated
+	// ones alike, once (actionsOn04). Before, it was On screen, In the
+	// toolbar or Hidden (actionsMode), and a copy that was updating started
+	// Hidden; and it's unfolded once too (actionsOpen04), so nobody is left
+	// with only its 6-point tab -- the Mac's Prefs.migrateActions. After
+	// that, on or off and folded are theirs, and stick.
+	actionsOn = r.b("actionsOn04", false) ? r.b("actionsOn", true) : true;
+	actionsCollapsed = r.b("actionsOpen04", false) ? r.b("actionsCollapsed", false) : false;
 	actionsHoverOpen = r.b("actionsHoverOpen", true);
 	actionsOrder = r.s("actionsOrder", "");
 	actionsShownSet = r.has("actionsShown");
@@ -316,10 +312,22 @@ void Prefs::loadFrom(const std::string& path, const std::string* marker) {
 	}
 	installedRelease = r.s("installedRelease", "");
 	hasSeenWelcome = r.b("hasSeenWelcome", hasSeenWelcome);
+	showMeAroundSeen = r.b("showMeAroundSeen", showMeAroundSeen);
 	firstLaunchPlayed = r.b("firstLaunchPlayed", firstLaunchPlayed);
 	introFirstLaunchPlayed = r.b("introFirstLaunchPlayed", introFirstLaunchPlayed);
 	introUpdatePlayed = r.s("introUpdatePlayed", introUpdatePlayed);
-	introEveryLaunch = r.b("introEveryLaunch", introEveryLaunch);
+	// "When CedarLogic opens", or, before it, the checkbox "Play the intro
+	// every time CedarLogic opens", settled once: never touched, the short
+	// intro; turned off, the classic launch screen; turned on, the full
+	// intro. The checkbox was off to begin with and every save wrote it, so
+	// a "false" with no introEveryLaunchSet says nothing, and a "true" means
+	// it was turned on; then (from introEveryLaunchSet on) it was on to begin
+	// with, so there a "false" is the one choice it records ("true" might be
+	// the default, so the short intro).
+	const int atLaunch = intro::atLaunchFromKey(r.s("introAtLaunch", ""));
+	if (atLaunch >= 0) introAtLaunch = atLaunch;
+	else if (r.b("introEveryLaunchSet", false)) introAtLaunch = r.b("introEveryLaunch", true) ? intro::AtShort : intro::AtClassic;
+	else introAtLaunch = r.b("introEveryLaunch", false) ? intro::AtFull : intro::AtShort;
 	windowWidth = r.i("windowWidth", windowWidth, 400, 20000);
 	windowHeight = r.i("windowHeight", windowHeight, 300, 20000);
 	windowMaximized = r.b("windowMaximized", windowMaximized);
@@ -362,6 +370,11 @@ void Prefs::loadFrom(const std::string& path, const std::string* marker) {
 	seenWhatsNew = r.s("seenWhatsNew", seenWhatsNew);
 	confirmQuit = r.b("confirmQuit", confirmQuit);
 	startMenu = r.i("startMenu", startMenu, 0, 2);
+	crashReports = r.i("crashReports", crashReports, -1, 1);
+	usageStats = r.b("usageStats", usageStats);
+	privacyAsked = r.b("privacyAsked", privacyAsked);
+	privacyChoice = r.s("privacyChoice", privacyChoice);
+	if (privacyChoice != "yes" && privacyChoice != "no" && privacyChoice != "custom") privacyChoice.clear();
 	recent.clear();
 	for (int i = 0; i < 10; i++) {
 		const std::string v = r.s(strf("recent%d", i).c_str(), "");
@@ -425,12 +438,13 @@ std::string Prefs::text() const {
 	o << "showTitle=" << b(showTitle) << "\n";
 	o << "showThemeToggle=" << b(showThemeToggle) << "\n";
 	o << "showStepClock=" << b(showStepClock) << "\n";
-	o << "actionsMode=" << actionsMode << "\n";
+	o << "actionsOn=" << b(actionsOn) << "\n";
+	o << "actionsOn04=1\n";
+	o << "actionsOpen04=1\n";
 	o << "actionsCollapsed=" << b(actionsCollapsed) << "\n";
 	o << "actionsHoverOpen=" << b(actionsHoverOpen) << "\n";
 	o << "actionsOrder=" << actionsOrder << "\n";
 	if (actionsShownSet) o << "actionsShown=" << actionsShown << "\n";
-	o << "actionsHint=" << b(actionsHint) << "\n";
 	o << "newPagesShareLinks=" << b(newPagesShareLinks) << "\n";
 	o << "inkTool=" << inkTool << "\n";
 	o << "penColor=" << penColor << "\n";
@@ -447,10 +461,11 @@ std::string Prefs::text() const {
 	o << "testingGroupNotice=" << b(testingGroupNotice) << "\n";
 	o << "installedRelease=" << installedRelease << "\n";
 	o << "hasSeenWelcome=" << b(hasSeenWelcome) << "\n";
+	o << "showMeAroundSeen=" << b(showMeAroundSeen) << "\n";
 	o << "firstLaunchPlayed=" << b(firstLaunchPlayed) << "\n";
 	o << "introFirstLaunchPlayed=" << b(introFirstLaunchPlayed) << "\n";
 	o << "introUpdatePlayed=" << introUpdatePlayed << "\n";
-	o << "introEveryLaunch=" << b(introEveryLaunch) << "\n";
+	o << "introAtLaunch=" << intro::atLaunchKey(introAtLaunch) << "\n";
 	o << "windowWidth=" << windowWidth << "\n";
 	o << "windowHeight=" << windowHeight << "\n";
 	o << "windowMaximized=" << b(windowMaximized) << "\n";
@@ -490,6 +505,10 @@ std::string Prefs::text() const {
 	o << "seenWhatsNew=" << seenWhatsNew << "\n";
 	o << "confirmQuit=" << b(confirmQuit) << "\n";
 	o << "startMenu=" << startMenu << "\n";
+	o << "crashReports=" << crashReports << "\n";
+	o << "usageStats=" << b(usageStats) << "\n";
+	o << "privacyAsked=" << b(privacyAsked) << "\n";
+	o << "privacyChoice=" << privacyChoice << "\n";
 	for (size_t i = 0; i < recent.size() && i < 10; i++) o << "recent" << i << "=" << recent[i] << "\n";
 	return o.str();
 }

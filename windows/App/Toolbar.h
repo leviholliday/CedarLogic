@@ -54,6 +54,12 @@ public:
 	void layoutNow() { relayout = true; redraw(); }
 	// Where a command's button is, on the screen (the guided tour points at it).
 	RECT commandRect(int command) const;
+	// For Show Me Around (ShowMeAround.h), on the screen: the tools at the
+	// left (New to Zoom), the run controls at the right (Pause, Step, Step
+	// Clock, the speed and Simulation View), or the menu bar's titles; empty
+	// when none of them is shown.
+	enum Spot { SpotTools, SpotRun, SpotMenus };
+	RECT spotRect(Spot which);
 	// For --click-test: the middle of a button, in the bar's pixels -- a
 	// command's, or kMinimize or kClose for the window's own. False when
 	// it isn't shown (the bar left it out at this width).

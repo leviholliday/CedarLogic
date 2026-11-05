@@ -6,12 +6,14 @@
 // Cheap enough for a Raspberry Pi: the canvas and its vignette, and the grid
 // (its fall-off towards the edges and the vignette over it baked in), are
 // drawn once into images and painted each frame, the grid scaled a little
-// for the slow push-in; the light under the gate, the motes and the lift of
+// for the slow push-in (and, once that's over, the two as one image); the
+// glows, the bloom, the light under the gate, the motes and the lift of
 // light at the hit are small images drawn once and painted stretched, as the
-// Mac's layers are; everything else is a few dozen strokes and fills, and
-// gradients for the glows. Only while a part of it is see-through (fading
-// in, the circuit going, the dissolve) is it drawn into a group of its own,
-// clipped to where that part is.
+// Mac's layers are (in Lite, without the push-in, the large ones are drawn
+// once at the window's size); everything else is a few dozen strokes and
+// fills. Only while a part of it is see-through (fading in, the circuit
+// going, the dissolve) is it drawn into a group of its own, clipped to where
+// that part is. --intro-bench (Splash.h) times each part.
 
 #include "Intro.h"
 #include "Actions.h"
@@ -151,18 +153,62 @@ void arc(std::vector<PointF>& out, double cx, double cy, double r, double from, 
 	}
 }
 
-// A soft green glow, white in the middle (wire heads, the LED, the icon).
-void glow(cairo_t* cr, PointF c, double radius, double opacity) {
-	if (opacity <= 0.002 || radius <= 0.1) return;
-	cairo_pattern_t* g = cairo_pattern_create_radial(c.x, c.y, 0, c.x, c.y, radius);
-	cairo_pattern_add_color_stop_rgba(g, 0, 1, 1, 1, opacity);
-	cairo_pattern_add_color_stop_rgba(g, 0.12, 0.6, 1, 0.72, 0.85 * opacity);
-	cairo_pattern_add_color_stop_rgba(g, 0.4, 0.22, 1, 0.42, 0.25 * opacity);
-	cairo_pattern_add_color_stop_rgba(g, 1, 0.22, 1, 0.42, 0);
-	cairo_set_source(cr, g);
-	cairo_arc(cr, c.x, c.y, radius, 0, 2 * G_PI);
-	cairo_fill(cr);
+// A radial image `side` pixels square: its stops from the middle out to
+// the edge, at full strength (painted at any opacity, as all its stops'
+// alpha go with the opacity).
+struct Stop { double at, r, g, b, a; };
+cairo_surface_t* radialImage(int side, std::initializer_list<Stop> stops, cairo_extend_t extend = CAIRO_EXTEND_PAD) {
+	cairo_surface_t* img = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, side, side);
+	cairo_t* c = cairo_create(img);
+	cairo_pattern_t* g = cairo_pattern_create_radial(side / 2.0, side / 2.0, 0, side / 2.0, side / 2.0, side / 2.0);
+	for (const Stop& st : stops) cairo_pattern_add_color_stop_rgba(g, st.at, st.r, st.g, st.b, st.a);
+	cairo_pattern_set_extend(g, extend);
+	cairo_set_source(c, g);
+	cairo_paint(c);
 	cairo_pattern_destroy(g);
+	cairo_destroy(c);
+	return img;
+}
+
+// `img` (clear at its edges) stretched over the circle at c of `radius`, at
+// `opacity`: only the square it covers is touched. `fast`: each pixel from
+// the nearest of the image's, not a blend of four (several times cheaper on
+// an ARM CPU, and a soft glow from a large enough image looks the same).
+void paintRound(cairo_t* cr, cairo_surface_t* img, PointF c, double radius, double opacity, bool fast = false) {
+	const int n = cairo_image_surface_get_width(img);
+	cairo_save(cr);
+	cairo_translate(cr, c.x - radius, c.y - radius);
+	cairo_scale(cr, 2 * radius / n, 2 * radius / n);
+	cairo_set_source_surface(cr, img, 0, 0);
+	cairo_pattern_set_filter(cairo_get_source(cr), fast ? CAIRO_FILTER_FAST : CAIRO_FILTER_BILINEAR);
+	cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_NONE);
+	cairo_paint_with_alpha(cr, std::min(1.0, opacity));
+	cairo_restore(cr);
+}
+
+// A soft green glow, white in the middle (wire heads, the LED, the icon): an
+// image drawn once and painted stretched, as the Mac's layers are (a
+// gradient worked out for every pixel of it, every frame, is too much for a
+// Raspberry Pi at the LED's and the icon's size).
+cairo_surface_t* glowImage(int side) {
+	return radialImage(side, { { 0, 1, 1, 1, 1 }, { 0.12, 0.6, 1, 0.72, 0.85 }, { 0.4, 0.22, 1, 0.42, 0.25 }, { 1, 0.22, 1, 0.42, 0 } },
+	                   CAIRO_EXTEND_NONE);
+}
+void glow(cairo_t* cr, PointF c, double radius, double opacity, bool fast = false) {
+	if (opacity <= 0.002 || radius <= 0.1) return;
+	Timed timed(kGlows);
+	static cairo_surface_t* small = glowImage(64);
+	static cairo_surface_t* large = glowImage(384);
+	static cairo_surface_t* larger = nullptr;   // (for `fast`: as large as the glow gets)
+	double dx = 2 * radius, dy = 0;
+	cairo_user_to_device_distance(cr, &dx, &dy);
+	const double across = std::hypot(dx, dy);
+	if (fast && across > 384) {
+		if (!larger) larger = glowImage(768);
+		paintRound(cr, larger, c, radius, opacity, true);
+		return;
+	}
+	paintRound(cr, across <= 96 ? small : large, c, radius, opacity, fast && across > 96);
 }
 
 void circle(cairo_t* cr, PointF c, double r) {
@@ -194,6 +240,112 @@ bool gDashArg = false;
 
 }  // namespace
 
+// ---- Its clock ----------------------------------------------------------------------
+
+namespace {
+const size_t kRecent = 8;   // frames looked at
+const double kSlowGap = 0.021, kSlowDraw = 16;   // Lite past these (s, ms)
+// The tier is settled after this many frames (or this far in), and may still
+// drop to Lite until this far in.
+const int kJudgeFrames = 8;
+const double kJudgeBy = 0.5, kLastDrop = kLedAt - 0.3;
+
+void keep(std::vector<double>& v, double x) {
+	v.push_back(x);
+	if (v.size() > kRecent) v.erase(v.begin());
+}
+double median(std::vector<double> v) {
+	if (v.empty()) return 0;
+	std::sort(v.begin(), v.end());
+	return v.size() % 2 ? v[v.size() / 2] : (v[v.size() / 2 - 1] + v[v.size() / 2]) / 2;
+}
+}  // namespace
+
+double Pacer::recentGap() const { return gaps_.empty() ? tierGap_ : median(gaps_); }
+double Pacer::recentDraw() const { return draws_.empty() ? tierDraw_ : median(draws_); }
+
+void Pacer::idle(double now) { if (last_ >= 0) last_ = now; }
+
+double Pacer::frame(double now, double drawMs) {
+	frames_++;
+	if (last_ < 0) {
+		// The first frame up: the picture starts here, at 0.
+		last_ = now;
+		return 0;
+	}
+	const double gap = std::max(0.0, now - last_);
+	last_ = now;
+	double step = std::min(gap, kMaxStep);
+	keep(gaps_, gap);
+	// (The first frames drawn make the images the scene keeps: not counted.)
+	if (frames_ > 2) keep(draws_, drawMs);
+	keep(paces_, gap > 0 ? step / gap : 1);
+	// From the sound's start until the LED, where the picture should be for
+	// the LED to land with the bell (at the pace the sound was started for):
+	// never ahead of that (it waits), and when behind, catching up by as much
+	// as half a frame more a frame (never more than kMaxStep).
+	if (soundAt_ >= 0 && t_ < kLedAt) {
+		const double due = kLedAt - (kLedAt - soundTime(now)) * soundPace_;
+		const double lag = due - t_;
+		if (lag <= step) step = std::max(0.0, lag);
+		else step = std::min({ kMaxStep, lag, std::max(step, 1.5 * gap) });
+	}
+	t_ += step;
+	judge();
+	return step;
+}
+
+void Pacer::judge() {
+	if (tier_ == Tier::Lite || gaps_.size() < 5) return;
+	const bool slow = median(gaps_) > kSlowGap || (draws_.size() >= 4 && median(draws_) > kSlowDraw);
+	if (!decided_ && (frames_ >= kJudgeFrames || t_ >= kJudgeBy)) decided_ = true;
+	if (decided_ && slow && t_ < kLastDrop) {
+		tier_ = Tier::Lite;
+		tierAt_ = t_;
+		tierGap_ = median(gaps_);
+		tierDraw_ = median(draws_);
+		// The frames to come are another tier's: measured afresh.
+		gaps_.clear();
+		draws_.clear();
+		paces_.clear();
+	}
+}
+
+double Pacer::soundStart(double now) const {
+	(void)now;
+	if (!soundOwed_ || soundAt_ >= 0) return -1;
+	// Not before the tier is settled and the pace measured.
+	if (!decided_ || paces_.size() < 4) return -1;
+	if (t_ >= kLedAt - 0.05) return kLedAt - 0.05;   // (late: the bell at once)
+	// The picture's pace (picture seconds a second): keeping time, or on a
+	// slow machine a little under what it's been, so that the picture, if
+	// anything, is early for the bell and waits for it (it can always slow,
+	// but can only catch up where its frames come quicker than kMaxStep).
+	const double measured = median(paces_);
+	const double pace = measured >= 0.97 ? 1 : std::max(0.05, measured * 0.9);
+	const double left = (kLedAt - t_) / pace;   // seconds until the LED is due
+	if (left > kLedAt) return -1;                 // more than the cut has before its bell
+	return kLedAt - left;
+}
+
+void Pacer::soundStarted(double now, double offset) {
+	soundAt_ = now;
+	soundOffset_ = offset;
+	soundOwed_ = false;
+	// The pace it was started for: the picture's time left to the LED over the sound's.
+	const double left = kLedAt - offset;
+	soundPace_ = left > 0.01 ? std::min(1.0, std::max(0.05, (kLedAt - t_) / left)) : 1;
+}
+
+// ---- Measuring ----------------------------------------------------------------------
+
+Prof* gProf = nullptr;
+
+const char* partName(int part) {
+	static const char* names[kParts] = { "clear", "backdrop", "grid", "under", "glows", "motes", "wires", "display", "icon", "bloom", "panel", "groups" };
+	return part >= 0 && part < kParts ? names[part] : "?";
+}
+
 // ---- When ----------------------------------------------------------------------------
 
 const char* name(Trigger t) {
@@ -201,9 +353,12 @@ const char* name(Trigger t) {
 	case Trigger::First: return "first";
 	case Trigger::Update: return "update";
 	case Trigger::Every: return "every";
+	case Trigger::Short: return "short";
 	default: return "none";
 	}
 }
+
+const char* name(Tier t) { return t == Tier::Lite ? "lite" : "full"; }
 
 double easeInOut(double u) {
 	const double c = clamp01(u);
@@ -233,7 +388,36 @@ Trigger owed() { return owed(prefs()); }
 Trigger forLaunch(const Prefs& p) {
 	const Trigger t = owed(p);
 	if (t != Trigger::None) return t;
-	return p.introEveryLaunch ? Trigger::Every : Trigger::None;
+	switch (p.introAtLaunch) {
+	case kAtFull: return Trigger::Every;
+	case kAtClassic:
+	case kAtNone: return Trigger::None;
+	default: return Trigger::Short;
+	}
+}
+
+const char* atLaunchKey(int choice) {
+	static const char* keys[kAtCount] = { "short", "full", "classic", "none" };
+	return choice >= 0 && choice < kAtCount ? keys[choice] : keys[kAtShort];
+}
+const char* atLaunchTitle(int choice) {
+	static const char* titles[kAtCount] = { "Short intro", "Full intro", "Classic launch screen", "None" };
+	return choice >= 0 && choice < kAtCount ? titles[choice] : titles[kAtShort];
+}
+int atLaunchFrom(const std::string& saved) {
+	for (int i = 0; i < kAtCount; i++) if (saved == atLaunchKey(i)) return i;
+	return -1;
+}
+int settleAtLaunch(bool, bool) { return kAtShort; }
+std::string atLaunchHint(int choice) {
+	const std::string always = " The first launch and the first after an update always play the full intro, with its sound. Help ▸ Play the "
+	                           "Intro plays it any time.";
+	switch (choice) {
+	case kAtFull: return "The circuit draws itself, then the launch screen, as on the first launch, without its sound." + always;
+	case kAtClassic: return "The launch screen as it was before the intro: CedarLogic's panel, a sweep of light, and the window, silent." + always;
+	case kAtNone: return "Straight into the circuit window, no launch screen." + always;
+	default: return "The circuit draws itself, then the window opens: about three and a half seconds, silent." + always;
+	}
 }
 
 void log(const std::string& what) {
@@ -253,7 +437,13 @@ Trigger pending() {
 	return forLaunch(prefs());
 }
 
-// (Every launch's isn't owed, so there's nothing to keep.)
+bool straightIn(const Prefs& p) { return forLaunch(p) == Trigger::None && p.introAtLaunch == kAtNone; }
+bool straightIn() {
+	if (!allowed() || g_getenv("CL_INTRO")) return false;
+	return straightIn(prefs());
+}
+
+// (Every launch's and the short one aren't owed, so there's nothing to keep.)
 void markPlayed(Trigger t) {
 	if (t == Trigger::First) prefs().introFirstLaunchPlayed = true;
 	if (t == Trigger::Update) prefs().introUpdatePlayed = whatsnew::kVersion;
@@ -264,7 +454,8 @@ double freezeAt() {
 	return f ? g_ascii_strtod(f, nullptr) : 1e9;
 }
 
-PointF cardOrigin(float w, float h) { return { w / 2 - 280, h / 2 - 36 - 186 }; }
+// (On whole points, so the images the panel keeps land on whole pixels.)
+PointF cardOrigin(float w, float h) { return { std::floor(w / 2 - 280), std::floor(h / 2 - 36 - 186) }; }
 
 WireLook WireLook::current() {
 	const Prefs& p = prefs();
@@ -448,6 +639,9 @@ struct Scene::Impl {
 	};
 	std::vector<Mote> motes;
 
+	// The short intro (Scene::setShort): no icon, the display going with the circuit.
+	bool shortIntro = false;
+
 	Impl(float w_, float h_, const WireLook& l, bool live_) : w(w_), h(h_), look(l), live(live_) {
 		// The circuit and its display span about 580 units across.
 		k = std::min(w * 0.55 / 580, h * 0.84 / 512);
@@ -456,7 +650,7 @@ struct Scene::Impl {
 		build();
 	}
 	~Impl() {
-		for (cairo_surface_t* x : { bare, grid, underImage, moteImage, liftImage })
+		for (cairo_surface_t* x : { bare, grid, underImage, moteImage, liftImage, settled, underFull, liftFull })
 			if (x) cairo_surface_destroy(x);
 	}
 
@@ -639,22 +833,6 @@ struct Scene::Impl {
 		return a[3];
 	}
 
-	// A radial image `side` pixels square, its stops out to the edge and the
-	// last carried on into the corners (the Mac's IntroScene.radial).
-	struct Stop { double at, r, g, b, a; };
-	static cairo_surface_t* radialImage(int side, std::initializer_list<Stop> stops) {
-		cairo_surface_t* img = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, side, side);
-		cairo_t* c = cairo_create(img);
-		cairo_pattern_t* g = cairo_pattern_create_radial(side / 2.0, side / 2.0, 0, side / 2.0, side / 2.0, side / 2.0);
-		for (const Stop& st : stops) cairo_pattern_add_color_stop_rgba(g, st.at, st.r, st.g, st.b, st.a);
-		cairo_pattern_set_extend(g, CAIRO_EXTEND_PAD);
-		cairo_set_source(c, g);
-		cairo_paint(c);
-		cairo_pattern_destroy(g);
-		cairo_destroy(c);
-		return img;
-	}
-
 	void ensureGround(cairo_t* cr) {
 		double sx = 1, sy = 1;
 		cairo_surface_get_device_scale(cairo_get_target(cr), &sx, &sy);
@@ -762,16 +940,24 @@ struct Scene::Impl {
 	// at `gridShown`, the light under the gate at `under`, the motes at
 	// `moteShown` where they've drifted to by t.
 	void paintGround(cairo_t* cr, double gridShown, double far = 1, double under = 0, double moteShown = 0, double t = 0) {
-		cairo_set_source_surface(cr, bare, 0, 0);
-		cairo_paint(cr);
+		{
+			Timed timed(kBackdrop);
+			cairo_set_source_surface(cr, bare, 0, 0);
+			cairo_paint(cr);
+		}
 		cairo_save(cr);
 		if (far != 1) about(cr, far);
 		if (gridShown > 0.002) {
+			Timed timed(kGrid);
 			cairo_set_source_surface(cr, grid, 0, 0);
 			if (far != 1) cairo_pattern_set_filter(cairo_get_source(cr), live ? CAIRO_FILTER_BILINEAR : CAIRO_FILTER_GOOD);
 			cairo_paint_with_alpha(cr, gridShown);
 		}
-		paintStretched(cr, underImage, underBox.left, underBox.top, underBox.right - underBox.left, underBox.bottom - underBox.top, under);
+		if (under > 0.002) {
+			Timed timed(kUnder);
+			paintUnder(cr, far, under);
+		}
+		Timed timed(kMotes);
 		if (moteShown > 0.002)
 			for (const Mote& m : motes) {
 				const double x = m.from.x + m.dx * t, y = m.from.y + m.dy * t;
@@ -816,8 +1002,9 @@ struct Scene::Impl {
 		// bloom under that ...
 		if (q > 0) {
 			const double widths[4] = { look.width + 16, look.width + 7, look.width + 3, look.width };
-			const double alphas[4] = { 0.045, 0.10, 0.22, 1 };
+			const double alphas[4] = { 0.045 * extras, 0.10 * extras, 0.22, 1 };
 			for (int i = 0; i < 4; i++) {
+				if (alphas[i] <= 0.002) continue;
 				p.trace(cr, 0, q);
 				stroke(cr, kNeon, alphas[i], widths[i], i == 0);
 			}
@@ -856,10 +1043,11 @@ struct Scene::Impl {
 		}
 		// The head: a soft light that narrows as it lands.
 		const double sc = (pulsing ? 1.15 : 0.9) * (1 - 0.45 * settle);
-		glow(cr, p.point(f), 15 * sc, shown);
+		glow(cr, p.point(f), 15 * sc, shown, tier == Tier::Lite);
 	}
 
 	void drawCircuit(cairo_t* cr, double t) {
+		Timed timed(kWires);
 		// The gate fires: its inside glows green.
 		if (t >= 1.26) {
 			inside.whole(cr);
@@ -931,7 +1119,7 @@ struct Scene::Impl {
 		const double fu = clamp01((t - kLedAt) / 0.45);
 		const double flash = fu > 0 ? std::pow(1 - fu, 2) * std::min(1.0, fu / 0.08) : 0;
 		const double g = 0.6 + 0.8 * lit + 0.55 * flash + 0.4 * smooth(t, kBloomAt - 0.22, kBloomAt);
-		glow(cr, ledC, 75 * k * g, lit);
+		glow(cr, ledC, 75 * k * g, lit, tier == Tier::Lite);
 		const double ringO = smooth(t, 1.88, 1.98);
 		if (ringO > 0.002) {
 			const double s = pop(t, 1.91, 0.3);
@@ -953,6 +1141,7 @@ struct Scene::Impl {
 	}
 
 	void drawDisplay(cairo_t* cr, double t) {
+		Timed timed(kDisplay);
 		housing.whole(cr);
 		set(cr, kSilver, 0.06);
 		cairo_fill(cr);
@@ -987,9 +1176,12 @@ struct Scene::Impl {
 		// Over the circuit, its own art where the circuit was, then flying to
 		// where the launch screen's own icon is, and handing over (landed just
 		// as the panel is half in, so they don't double up).
+		// (The short intro has none: its bloom goes straight into the window.)
+		if (shortIntro) return;
 		const double landed = kCardIn + kCardFade;
 		const double o = smooth(t, kBloomAt + 0.05, kBloomAt + 0.26) * (1 - smooth(t, landed - 0.14, landed));
 		if (o <= 0.002) return;
+		Timed timed(kIcon);
 		const double fly = smooth(t, kBloomAt + 0.14, kBloomAt + 0.44);
 		// (From where the circuit is, pushed in.)
 		const double bigSide = 512 * k * near, small = cardIconSize;
@@ -998,7 +1190,8 @@ struct Scene::Impl {
 		const double x = big.x + (cardIcon.x - small / 2 - big.x) * fly, y = big.y + (cardIcon.y - small / 2 - big.y) * fly;
 		const double side = bigSide + (small - bigSide) * fly;
 		const PointF centre = { (float)(x + side / 2), (float)(y + side / 2) };
-		glow(cr, centre, side * 1.9 / 2, o * (0.55 + 0.25 * (1 - fly)));
+		// (Its glow is one of the extras Lite leaves out.)
+		glow(cr, centre, side * 1.9 / 2, o * (0.55 + 0.25 * (1 - fly)) * extras, tier == Tier::Lite);
 		cairo_surface_t* icon = launchIcon();
 		cairo_save(cr);
 		if (icon) {
@@ -1023,21 +1216,21 @@ struct Scene::Impl {
 	void drawBloom(cairo_t* cr, double t, double near) {
 		const double o = 0.9 * smooth(t, kBloomAt - 0.02, kBloomAt + 0.08) * (1 - smooth(t, kBloomAt + 0.14, kBloomAt + 0.56));
 		if (o <= 0.002) return;
+		Timed timed(kBloom);
 		const double bs = 0.04 + 0.96 * ease(t, kBloomAt, kBloomAt + 0.44);
 		const double r = std::max(w, h) * 1.6 / 2 * bs;
-		const PointF c = onStage(ledC, near);
-		cairo_pattern_t* g = cairo_pattern_create_radial(c.x, c.y, 0, c.x, c.y, r);
-		cairo_pattern_add_color_stop_rgba(g, 0, 0.9, 1, 0.93, o);
-		cairo_pattern_add_color_stop_rgba(g, 0.05, 0.45, 1, 0.6, 0.7 * o);
-		cairo_pattern_add_color_stop_rgba(g, 0.22, 0.22, 1, 0.42, 0.16 * o);
-		cairo_pattern_add_color_stop_rgba(g, 0.5, 0.22, 1, 0.42, 0.04 * o);
-		cairo_pattern_add_color_stop_rgba(g, 1, 0.22, 1, 0.42, 0);
-		cairo_set_source(cr, g);
-		// (Out past its edge it's clear: only the canvas it covers is filled.)
-		const double l = std::max(0.0, c.x - r), tp = std::max(0.0, c.y - r);
-		cairo_rectangle(cr, l, tp, std::min((double)w, c.x + r) - l, std::min((double)h, c.y + r) - tp);
-		cairo_fill(cr);
-		cairo_pattern_destroy(g);
+		// (Drawn once and painted stretched, as the glows are; out past its
+		// edge it's clear, and only the canvas it covers is touched.)
+		auto bloomImage = [](int side) {
+			return radialImage(side, { { 0, 0.9, 1, 0.93, 1 }, { 0.05, 0.45, 1, 0.6, 0.7 }, { 0.22, 0.22, 1, 0.42, 0.16 }, { 0.5, 0.22, 1, 0.42, 0.04 },
+			                           { 1, 0.22, 1, 0.42, 0 } },
+			                   CAIRO_EXTEND_NONE);
+		};
+		static cairo_surface_t* image = bloomImage(512);
+		static cairo_surface_t* larger = nullptr;   // (Lite's, painted without blending: larger)
+		const bool lite = tier == Tier::Lite;
+		if (lite && !larger) larger = bloomImage(1024);
+		paintRound(cr, lite ? larger : image, onStage(ledC, near), r, o, lite);
 	}
 
 	// A part drawn at `opacity` as a whole (in a group, clipped to `box`, only
@@ -1047,21 +1240,106 @@ struct Scene::Impl {
 		if (opacity <= 0.002) return;
 		if (opacity >= 0.998) { f(); return; }
 		cairo_save(cr);
-		cairo_rectangle(cr, box.left, box.top, box.right - box.left, box.bottom - box.top);
-		cairo_clip(cr);
-		cairo_push_group(cr);
+		{
+			Timed timed(kGroups);
+			cairo_rectangle(cr, box.left, box.top, box.right - box.left, box.bottom - box.top);
+			cairo_clip(cr);
+			cairo_push_group(cr);
+		}
 		f();
+		Timed timed(kGroups);
 		cairo_pop_group_to_source(cr);
 		cairo_paint_with_alpha(cr, opacity);
 		cairo_restore(cr);
 	}
 
+	// The canvas and its grid at `far`, as one image, once it no longer
+	// changes (the push-in over or held, the grid all the way up, the light
+	// under the gate and the motes gone or left out): one copy a frame
+	// instead of two, the grid's scaled.
+	cairo_surface_t* settled = nullptr;
+	double settledFar = -1, settledScale = 0;
+	void paintSettled(cairo_t* cr, double far, double opacity) {
+		Timed timed(kBackdrop);
+		if (!settled || settledFar != far || settledScale != cachedScale) {
+			if (settled) cairo_surface_destroy(settled);
+			settled = cairo_surface_create_similar(cairo_get_target(cr), CAIRO_CONTENT_COLOR, (int)std::ceil(w), (int)std::ceil(h));
+			settledFar = far;
+			settledScale = cachedScale;
+			cairo_t* c = cairo_create(settled);
+			cairo_set_source_surface(c, bare, 0, 0);
+			cairo_paint(c);
+			if (far != 1) about(c, far);
+			cairo_set_source_surface(c, grid, 0, 0);
+			cairo_pattern_set_filter(cairo_get_source(c), CAIRO_FILTER_GOOD);
+			cairo_paint_with_alpha(c, 0.8);
+			cairo_destroy(c);
+		}
+		cairo_set_source_surface(cr, settled, 0, 0);
+		if (opacity >= 0.998) cairo_paint(cr);
+		else cairo_paint_with_alpha(cr, opacity);
+	}
+
+	// How much is drawn (Intro.h's Tier): from `liteAt` on, what Lite leaves
+	// out fades away, and the push-in eases back out from where it was.
+	Tier tier = Tier::Full;
+	double liteAt = 0;
+	double extras = 1;   // what Lite leaves out, as it fades (1: all of it)
+
+	// Without the push-in, the light under the gate and the lift of light at
+	// the hit don't move: each drawn once at the window's size and painted
+	// as it is (not stretched from a small image, every pixel, every frame).
+	cairo_surface_t* underFull = nullptr;
+	cairo_surface_t* liftFull = nullptr;
+	double fullScale = 0;
+	template <class F>
+	void paintFull(cairo_t* cr, cairo_surface_t*& img, double opacity, F&& draw) {
+		if (opacity <= 0.002) return;
+		if (fullScale != cachedScale) {
+			for (cairo_surface_t** x : { &underFull, &liftFull })
+				if (*x) { cairo_surface_destroy(*x); *x = nullptr; }
+			fullScale = cachedScale;
+		}
+		if (!img) {
+			img = cairo_surface_create_similar(cairo_get_target(cr), CAIRO_CONTENT_COLOR_ALPHA, (int)std::ceil(w), (int)std::ceil(h));
+			cairo_t* c = cairo_create(img);
+			draw(c);
+			cairo_destroy(c);
+		}
+		cairo_set_source_surface(cr, img, 0, 0);
+		cairo_paint_with_alpha(cr, std::min(1.0, opacity));
+	}
+	void paintUnder(cairo_t* cr, double far, double opacity) {
+		auto stretched = [&](cairo_t* c, double o) {
+			paintStretched(c, underImage, underBox.left, underBox.top, underBox.right - underBox.left, underBox.bottom - underBox.top, o);
+		};
+		if (far == 1) paintFull(cr, underFull, opacity, [&](cairo_t* c) { stretched(c, 1); });
+		else stretched(cr, opacity);
+	}
+	void paintLift(cairo_t* cr, double near, double opacity) {
+		const double side = std::max(w, h) * 1.6;
+		const PointF c = onStage(ledC, near);
+		auto stretched = [&](cairo_t* cc, double o) { paintStretched(cc, liftImage, c.x - side / 2, c.y - side / 2, side, side, o); };
+		if (near == 1) paintFull(cr, liftFull, opacity, [&](cairo_t* cc) { stretched(cc, 1); });
+		else stretched(cr, opacity);
+	}
+
 	void draw(cairo_t* cr, double t, double opacity) {
 		ensureGround(cr);
+		const bool lite = tier == Tier::Lite;
+		extras = lite ? 1 - smooth(t, liteAt, liteAt + 0.3) : 1;
+		// The camera: a slow push-in until the bloom, the circuit 4%, the
+		// backdrop behind it 2% (so they part a little: depth). (None in Lite:
+		// from where it had got to, it eases back out.)
+		const double push = lite ? smooth(std::min(t, liteAt), 0, kBloomAt + 0.35) * extras : smooth(t, 0, kBloomAt + 0.35);
+		const bool pushed = lite ? extras <= 0 : t >= kBloomAt + 0.35;   // where it ends up
+		// Once everything but the canvas has gone (the panel is over it), the
+		// canvas alone: no group needed to fade it.
+		if (t >= kGroundOnly && pushed) {
+			if (opacity > 0.002) paintSettled(cr, 1 + 0.02 * push, opacity);
+			return;
+		}
 		layer(cr, opacity, rectF(0, 0, w, h), [&] {
-			// The camera: a slow push-in until the bloom, the circuit 4%, the
-			// backdrop behind it 2% (so they part a little: depth).
-			const double push = smooth(t, 0, kBloomAt + 0.35);
 			const double near = 1 + 0.04 * push, far = 1 + 0.02 * push;
 			// A breath in just before the hit: the light under the gate and the
 			// grid dim a touch for about a tenth of a second, so the LED pops.
@@ -1074,22 +1352,25 @@ struct Scene::Impl {
 			const double under = (0.35 * smooth(t, 0.3, 1.6) + 0.4 * smooth(t, 2.1, 2.5) + 0.25 * smooth(t, kLedAt, kLedAt + 0.3)) *
 			                     (1 - 0.35 * breath) * (1 - smooth(t, kBloomAt + 0.1, kBloomAt + 0.4));
 			// The motes drift, each breathing a little.
-			const double moteShown = smooth(t, 0.4, 1.6) * (1 - smooth(t, kBloomAt + 0.05, kBloomAt + 0.35));
-			paintGround(cr, gridShown, far, under, moteShown, t);
+			const double moteShown = smooth(t, 0.4, 1.6) * (1 - smooth(t, kBloomAt + 0.05, kBloomAt + 0.35)) * extras;
+			if (pushed && t >= 1.5 && breath <= 0 && under <= 0.002 && moteShown <= 0.002) paintSettled(cr, far, 1);
+			else paintGround(cr, gridShown, far, under, moteShown, t);
 			// The circuit goes as the icon arrives over it; the display (and the
-			// canvas) as the launch screen's panel comes in.
+			// canvas) as the launch screen's panel comes in. In the short intro
+			// (no icon, no panel), both go together, into the bloom.
 			cairo_save(cr);
 			about(cr, near);
-			layer(cr, 1 - smooth(t, kBloomAt + 0.12, kBloomAt + 0.32), circuitBox, [&] { drawCircuit(cr, t); });
-			layer(cr, smooth(t, 1.86, 2.0) * (1 - smooth(t, kCardIn, kCardIn + kCardFade)), displayBox, [&] { drawDisplay(cr, t); });
+			const double circuitGoes = smooth(t, kBloomAt + 0.12, kBloomAt + 0.32);
+			const double displayGoes = shortIntro ? circuitGoes : smooth(t, kCardIn, kCardIn + kCardFade);
+			layer(cr, 1 - circuitGoes, circuitBox, [&] { drawCircuit(cr, t); });
+			layer(cr, smooth(t, 1.86, 2.0) * (1 - displayGoes), displayBox, [&] { drawDisplay(cr, t); });
 			cairo_restore(cr);
 			// The hit: a lift of light out of the LED over everything, for
 			// about 150 ms.
 			const double hu = (t - kLedAt) / 0.18;
 			if (hu > 0 && hu < 1) {
-				const double side = std::max(w, h) * 1.6;
-				const PointF c = onStage(ledC, near);
-				paintStretched(cr, liftImage, c.x - side / 2, c.y - side / 2, side, side, std::min(1.0, hu / 0.14) * std::pow(1 - hu, 2));
+				Timed timed(kGlows);
+				paintLift(cr, near, std::min(1.0, hu / 0.14) * std::pow(1 - hu, 2));
 			}
 			drawIcon(cr, t, near);
 			drawBloom(cr, t, near);
@@ -1099,6 +1380,13 @@ struct Scene::Impl {
 
 Scene::Scene(float w, float h, const WireLook& look, bool live) : d(new Impl(w, h, look, live)) {}
 Scene::~Scene() { delete d; }
+void Scene::setTier(Tier tier, double at) {
+	d->tier = tier;
+	d->liteAt = std::max(0.0, at);
+}
+Tier Scene::tier() const { return d->tier; }
+void Scene::setShort(bool on) { d->shortIntro = on; }
+void Scene::prepare(cairo_t* cr) { d->ensureGround(cr); }
 void Scene::draw(cairo_t* cr, double t, double opacity) { d->draw(cr, t, opacity); }
 void Scene::drawGround(cairo_t* cr, double opacity) {
 	d->ensureGround(cr);
@@ -1117,6 +1405,10 @@ int render(const std::string& dir, Trigger trigger, const std::string& behind) {
 	const float W = 1280, H = 800;
 	const int scale = 2;
 	Scene scene(W, H, WireLook::current(), false);
+	// The short intro: no panel, and its own, earlier, crossfade.
+	const bool brief = isShort(trigger);
+	scene.setShort(brief);
+	const double dissolveAt = dissolveFor(trigger), fade = fadeFor(trigger);
 	cairo_surface_t* back = nullptr;
 	if (!behind.empty()) {
 		back = cairo_image_surface_create_from_png(behind.c_str());
@@ -1127,7 +1419,7 @@ int render(const std::string& dir, Trigger trigger, const std::string& behind) {
 		}
 	}
 	const PointF card = cardOrigin(W, H);
-	const int frames = (int)std::lround(kTotal * 60);
+	const int frames = (int)std::lround(lengthFor(trigger) * 60);
 	int failed = 0;
 	for (int f = 0; f <= frames; f++) {
 		const double t = f / 60.0;
@@ -1136,9 +1428,9 @@ int render(const std::string& dir, Trigger trigger, const std::string& behind) {
 		cairo_t* cr = cairo_create(surface);
 		cairo_set_source_rgb(cr, 0, 0, 0);
 		cairo_paint(cr);
-		const double shown = easeInOut((t - kDissolveAt) / kFade);
+		const double shown = easeInOut((t - dissolveAt) / fade);
 		// The window under it all, put in as the dissolve begins.
-		if (t >= kDissolveAt) {
+		if (t >= dissolveAt) {
 			if (back) {
 				const int bw = cairo_image_surface_get_width(back), bh = cairo_image_surface_get_height(back);
 				const double s = std::max(W / bw, H / bh);
@@ -1156,7 +1448,7 @@ int render(const std::string& dir, Trigger trigger, const std::string& behind) {
 		// The intro, fading in at first as a whole, and out into the window.
 		scene.draw(cr, t, (1 - shown) * fadeInShown(t));
 		// The launch screen's panel, at its own time.
-		if (t >= kCardIn) drawPanelAfterIntro(cr, card.x, card.y, t - kCardIn + kSplashAt, easeInOut((t - kCardIn) / kCardFade) * (1 - shown), false);
+		if (!brief && t >= kCardIn) drawPanelAfterIntro(cr, card.x, card.y, t - kCardIn + kSplashAt, easeInOut((t - kCardIn) / kCardFade) * (1 - shown), false);
 		cairo_destroy(cr);
 		const std::string file = dir + format("/frame-%04d.png", f);
 		if (cairo_surface_write_to_png(surface, file.c_str()) != CAIRO_STATUS_SUCCESS) failed++;
@@ -1214,11 +1506,65 @@ bool menuHas(GMenuModel* model, const char* action, std::string& label, std::str
 	return false;
 }
 
+// The intro's clock with frames coming as `gap(f)` says (seconds after frame
+// f) and taking `draw(f)` ms to draw, the sound owed: what it did.
+struct Played {
+	double firstStep = -1, maxStep = 0, wall = 0;
+	bool backwards = false;
+	int frames = 0;
+	Tier tier = Tier::Full;
+	double tierAt = 0;
+	bool sound = false;
+	double soundFrom = -1;
+	// Where the sound was (in the picture's time, the bell at kLedAt) as the
+	// picture reached the LED: 0, the bell right on it.
+	double bellAtLed = -99;
+};
+template <class Gap, class Draw>
+Played play(Gap gap, Draw draw) {
+	Pacer p;
+	p.soundOwed();
+	Played r;
+	double now = 1000;
+	for (int f = 0; f < 20000 && p.t() < kTotal; f++) {
+		const double before = p.t();
+		const double step = p.frame(now, draw(f));
+		if (f == 0) r.firstStep = step;
+		r.maxStep = std::max(r.maxStep, step);
+		if (p.t() < before) r.backwards = true;
+		const double from = p.soundStart(now);
+		if (from >= 0) {
+			p.soundStarted(now, from);
+			r.sound = true;
+			r.soundFrom = from;
+		}
+		if (before < kLedAt && p.t() >= kLedAt && p.soundStarted()) r.bellAtLed = p.soundTime(now) - kLedAt;
+		r.frames++;
+		now += gap(f);
+	}
+	r.wall = now - 1000;
+	r.tier = p.tier();
+	r.tierAt = p.tierAt();
+	return r;
+}
+
+void expectPlayed(const char* how, const Played& r, double gap, Tier tier, bool bellChecked = true) {
+	expect(r.firstStep == 0 && r.maxStep <= kMaxStep + 1e-9 && !r.backwards,
+	       format("%s: the clock starts at 0 with the first frame and never moves on more than %.1f ms a frame (most %.1f ms)", how,
+	              kMaxStep * 1000, r.maxStep * 1000));
+	expect(r.tier == tier, format("%s: drawn %s (from %.2f s), %.2f s to play it, %d frames", how, name(r.tier), r.tierAt, r.wall, r.frames));
+	if (bellChecked)
+		expect(r.sound && r.bellAtLed >= -1e-6 && r.bellAtLed <= std::max(gap, kMaxStep) + 0.005,
+		       format("%s: the bell lands on the LED (the sound from %.2f s into its cut, %.0f ms off at the LED)", how, r.soundFrom, r.bellAtLed * 1000));
+}
+
 }  // namespace
 
 Trigger parse(const char* s) {
 	if (s == nullptr) return Trigger::None;
-	return strcmp(s, "update") == 0 ? Trigger::Update : strcmp(s, "every") == 0 ? Trigger::Every : Trigger::First;
+	return strcmp(s, "update") == 0 ? Trigger::Update : strcmp(s, "every") == 0 ? Trigger::Every
+	     : strcmp(s, "short") == 0  ? Trigger::Short
+	                                : Trigger::First;
 }
 
 int check(GMenuModel* menubar) {
@@ -1232,33 +1578,128 @@ int check(GMenuModel* menubar) {
 	       "the panel's sweep ends at 4.42 s and it holds, finished, 1.1 s");
 	expect((int)std::lround(kTotal * 60) + 1 == 365, "365 frames at 60 fps");
 
+	// ---- Its clock, with frames coming quickly, slowly, and late ----
+	{
+		const double f60 = 1.0 / 60;
+		const Played fast = play([&](int) { return f60; }, [](int) { return 5.0; });
+		expectPlayed("60 fps", fast, f60, Tier::Full);
+		expect(std::fabs(fast.wall - kTotal) < 0.1, format("60 fps: it keeps time (%.2f s for %.2f s)", fast.wall, kTotal));
+		const Played thirty = play([](int) { return 1.0 / 30; }, [](int) { return 12.0; });
+		expectPlayed("30 fps", thirty, 1.0 / 30, Tier::Lite);
+		expect(std::fabs(thirty.wall - kTotal) < 0.15, format("30 fps: it still keeps time (%.2f s)", thirty.wall));
+		// A stall of 0.6 s in the middle (the machine busy): one frame's step, not a jump.
+		const Played stall = play([&](int f) { return f == 100 ? 0.6 : f60; }, [](int) { return 5.0; });
+		expectPlayed("60 fps with a 0.6 s stall", stall, f60, Tier::Full, false);
+		expect(stall.wall > kTotal + 0.2, format("the stall makes it longer (%.2f s), not skip ahead", stall.wall));
+		// Slow to draw at 60 Hz (20 ms a frame: every other refresh).
+		const Played heavy = play([](int) { return 2.0 / 60; }, [](int) { return 20.0; });
+		expectPlayed("20 ms draws", heavy, 2.0 / 60, Tier::Lite);
+		// A Raspberry Pi drawing a large window: 40 ms, and 100 ms, a frame.
+		const Played pi = play([](int) { return 0.04; }, [](int) { return 35.0; });
+		expectPlayed("40 ms frames", pi, 0.04, Tier::Lite);
+		const Played slow = play([](int) { return 0.1; }, [](int) { return 90.0; });
+		expectPlayed("100 ms frames", slow, 0.1, Tier::Lite);
+		expect(slow.tierAt < 0.5, format("100 ms frames: Lite from the first frames (%.2f s)", slow.tierAt));
+		// Uneven frames, 8 to 30 ms apart.
+		uint64_t seed = 7;
+		auto jitter = [&](int) {
+			seed = seed * 6364136223846793005ull + 1442695040888963407ull;
+			return 0.008 + 0.022 * ((seed >> 33) % 1000) / 1000.0;
+		};
+		const Played uneven = play(jitter, [](int) { return 6.0; });
+		expect(uneven.firstStep == 0 && uneven.maxStep <= kMaxStep + 1e-9 && !uneven.backwards,
+		       format("uneven frames: never more than %.1f ms a frame (most %.1f ms)", kMaxStep * 1000, uneven.maxStep * 1000));
+		// Quick, then slow from 1 s in: still never a jump, and Lite from then.
+		double clock = 0;
+		const Played later = play([&](int) { const double g = clock < 1 ? f60 : 0.05; clock += g; return g; }, [&](int) { return clock < 1 ? 5.0 : 45.0; });
+		expectPlayed("quick, then slow from 1 s", later, 0.05, Tier::Lite, false);
+	}
+
+	// ---- The short intro's timeline ----
+	expect(std::fabs(kShortTotal - 3.55) < 0.005 && std::fabs(kShortDissolveAt - 3.15) < 0.005 && std::fabs(kShortFade - 0.4) < 1e-9,
+	       format("the short intro: about 3.5 s in all (%.2f), from the bloom straight into the window at %.2f over %.2f s", kShortTotal,
+	              kShortDissolveAt, kShortFade));
+	expect((int)std::lround(kShortTotal * 60) == 213 && lengthFor(Trigger::Short) == kShortTotal && lengthFor(Trigger::Every) == kTotal &&
+	           lengthFor(Trigger::First) == kTotal,
+	       "213 frames at 60 fps for the short one (frame 0 to 213); the full one for every other trigger");
+	expect(isShort(Trigger::Short) && !isShort(Trigger::Every) && !isShort(Trigger::First) && !hasSound(Trigger::Short),
+	       "the short intro is silent, and only Short is short");
+
 	// ---- Which launch plays which, and the sound ----
 	launchWith(nullptr);
-	expect(!prefs().introEveryLaunch, "\"Play the intro every time CedarLogic opens\" is off for a new install");
-	expect(forLaunch(prefs()) == Trigger::First && hasSound(Trigger::First), "the first launch plays the first intro, with the sound");
+	expect(prefs().introAtLaunch == kAtShort, format("\"When CedarLogic opens\" is Short intro for a new install (%s)", atLaunchKey(prefs().introAtLaunch)));
+	expect(forLaunch(prefs()) == Trigger::First && hasSound(Trigger::First), "the first launch plays the full intro, with the sound");
+	for (int c = 0; c < kAtCount; c++) {
+		prefs().introAtLaunch = c;
+		if (forLaunch(prefs()) != Trigger::First || straightIn(prefs()))
+			expect(false, format("the first launch plays the full intro whatever the choice (%s: %s)", atLaunchKey(c), name(forLaunch(prefs()))));
+	}
 	const std::string seen = "[CedarLogic]\nhasSeenWelcome=true\nfirstLaunchPlayed=true\nintroFirstLaunchPlayed=true\n";
 	launchWith((seen + "seenWhatsNew=0.3\n").c_str());
 	expect(forLaunch(prefs()) == Trigger::Update, format("the first launch after an update plays the update intro (%s)", name(forLaunch(prefs()))));
 	expect(hasSound(forLaunch(prefs())), "and it has the sound");
-	prefs().introEveryLaunch = true;
-	expect(forLaunch(prefs()) == Trigger::Update && hasSound(forLaunch(prefs())), "an update's intro has the sound, setting or not");
-	launchWith((seen + "seenWhatsNew=" + v + "\nintroUpdatePlayed=" + v + "\n").c_str());
-	expect(!prefs().introEveryLaunch && forLaunch(prefs()) == Trigger::None, "a later launch plays no intro with the setting off");
-	prefs().introEveryLaunch = true;
+	bool updateAlways = true;
+	for (int c = 0; c < kAtCount; c++) {
+		prefs().introAtLaunch = c;
+		updateAlways = updateAlways && forLaunch(prefs()) == Trigger::Update && hasSound(forLaunch(prefs())) && !straightIn(prefs());
+	}
+	expect(updateAlways, "an update's intro plays, with the sound, whatever \"When CedarLogic opens\" says");
+	const std::string later = seen + "seenWhatsNew=" + v + "\nintroUpdatePlayed=" + v + "\n";
+	launchWith(later.c_str());
+	expect(prefs().introAtLaunch == kAtShort && forLaunch(prefs()) == Trigger::Short && !hasSound(forLaunch(prefs())) && !straightIn(prefs()),
+	       format("with nothing saved for it, a later launch plays the short intro, silently (%s)", name(forLaunch(prefs()))));
+	// Settled from 0.3's checkbox, which was saved with every save whatever it
+	// was (off by default until 2026-11-04, on after): the short intro either way.
+	launchWith((later + "introEveryLaunch=true\n").c_str());
+	expect(prefs().introAtLaunch == kAtShort && forLaunch(prefs()) == Trigger::Short,
+	       format("the old checkbox saved on: settled to the short intro (%s)", atLaunchKey(prefs().introAtLaunch)));
+	launchWith((later + "introEveryLaunch=false\n").c_str());
+	expect(prefs().introAtLaunch == kAtShort && forLaunch(prefs()) == Trigger::Short,
+	       format("the old checkbox saved off: settled to the short intro too (%s)", atLaunchKey(prefs().introAtLaunch)));
 	prefs().save();
-	launchWith((seen + "seenWhatsNew=" + v + "\nintroUpdatePlayed=" + v + "\nintroEveryLaunch=true\n").c_str());
-	expect(prefs().introEveryLaunch, "the setting is kept");
-	expect(forLaunch(prefs()) == Trigger::Every, format("with it on, a later launch plays the intro (%s)", name(forLaunch(prefs()))));
-	expect(!hasSound(forLaunch(prefs())), "an every-launch intro has no sound");
+	{
+		gchar* f = g_build_filename(g_get_user_config_dir(), "CedarLogic", "native.ini", nullptr);
+		gchar* text = nullptr;
+		g_file_get_contents(f, &text, nullptr, nullptr);
+		const std::string saved = text ? text : "";
+		g_free(text);
+		g_free(f);
+		expect(saved.find("introAtLaunch=short") != std::string::npos && saved.find("introEveryLaunch") == std::string::npos,
+		       "settled once: the choice is saved (introAtLaunch=short) and the old checkbox's key goes");
+	}
+	// Each choice, saved and read back.
+	struct Want { int choice; Trigger t; bool straight; };
+	for (const Want& wnt : { Want{ kAtShort, Trigger::Short, false }, Want{ kAtFull, Trigger::Every, false }, Want{ kAtClassic, Trigger::None, false },
+	                         Want{ kAtNone, Trigger::None, true } }) {
+		prefs().introAtLaunch = wnt.choice;
+		prefs().save();
+		launchWith((later + "introAtLaunch=" + atLaunchKey(wnt.choice) + "\nintroEveryLaunch=false\n").c_str());
+		expect(prefs().introAtLaunch == wnt.choice && forLaunch(prefs()) == wnt.t && straightIn(prefs()) == wnt.straight && !hasSound(forLaunch(prefs())),
+		       format("\"%s\" is kept, and a later launch plays %s%s, silently", atLaunchTitle(wnt.choice),
+		              wnt.t == Trigger::None ? (wnt.straight ? "nothing (straight into the window" : "the classic launch screen (no intro") : name(wnt.t),
+		              wnt.t == Trigger::None ? ")" : ""));
+	}
+	expect(atLaunchFrom("short") == kAtShort && atLaunchFrom("full") == kAtFull && atLaunchFrom("classic") == kAtClassic &&
+	           atLaunchFrom("none") == kAtNone && atLaunchFrom("every") < 0 && atLaunchFrom("") < 0,
+	       "saved as short, full, classic or none (the Mac's values); anything else isn't a choice");
+	expect(std::string(atLaunchTitle(kAtShort)) == "Short intro" && std::string(atLaunchTitle(kAtFull)) == "Full intro" &&
+	           std::string(atLaunchTitle(kAtClassic)) == "Classic launch screen" && std::string(atLaunchTitle(kAtNone)) == "None",
+	       "the four choices are named as the Mac's");
+	launchWith((later + "introAtLaunch=full\n").c_str());
 	markPlayed(Trigger::Every);
-	expect(prefs().introFirstLaunchPlayed && prefs().introUpdatePlayed == v, "playing it leaves the once-only keys as they were");
-	expect(hasSound(Trigger::First) && hasSound(Trigger::Update) && !hasSound(Trigger::Every) && !hasSound(Trigger::None),
+	markPlayed(Trigger::Short);
+	expect(prefs().introFirstLaunchPlayed && prefs().introUpdatePlayed == v, "playing the full or the short one leaves the once-only keys as they were");
+	expect(hasSound(Trigger::First) && hasSound(Trigger::Update) && !hasSound(Trigger::Every) && !hasSound(Trigger::Short) && !hasSound(Trigger::None),
 	       "sound for the first launch and updates only");
-	expect(parse("first") == Trigger::First && parse("update") == Trigger::Update && parse("every") == Trigger::Every,
-	       "CL_INTRO=first|update|every names each");
+	expect(parse("first") == Trigger::First && parse("update") == Trigger::Update && parse("every") == Trigger::Every && parse("short") == Trigger::Short,
+	       "CL_INTRO=first|update|every|short names each");
+	launchWith((seen + "seenWhatsNew=0.3\nintroAtLaunch=none\n").c_str());
+	markPlayed(Trigger::Update);
+	expect(owed(prefs()) == Trigger::None && forLaunch(prefs()) == Trigger::None && straightIn(prefs()),
+	       "the update intro plays once; after it, with None, straight in");
 	launchWith((seen + "seenWhatsNew=0.3\n").c_str());
 	markPlayed(Trigger::Update);
-	expect(forLaunch(prefs()) == Trigger::None, "the update intro plays once");
+	expect(forLaunch(prefs()) == Trigger::Short, format("and with nothing chosen, the short one (%s)", name(forLaunch(prefs()))));
 
 	// ---- Help > Play the Intro ----
 	const actions::Item* a = actions::find("playIntro");
@@ -1267,6 +1708,24 @@ int check(GMenuModel* menubar) {
 	std::string label, in;
 	const bool there = menuHas(menubar, "app.play-intro", label, in);
 	expect(there && label == "Play the _Intro" && in == "_Help", format("Help > Play the Intro is in the menu bar (\"%s\" in \"%s\")", label.c_str(), in.c_str()));
+
+	// ---- Help > Learn Logic Online… ----
+	const actions::Item* lo = actions::find("learnOnline");
+	expect(lo && strcmp(lo->menu, "Help") == 0 && strcmp(lo->title, "Learn Logic Online…") == 0 && strcmp(lo->action, "app.learn-online") == 0,
+	       "Learn Logic Online… is among the actions, in Help");
+	{
+		// Next to the lesson, in the actions' order and in the menu bar.
+		const std::vector<actions::Item>& every = actions::all();
+		bool after = false;
+		for (size_t i = 0; i + 1 < every.size(); i++)
+			if (strcmp(every[i].id, "tour") == 0) after = strcmp(every[i + 1].id, "learnOnline") == 0;
+		expect(after, "right after Learn Logic: Guided Tour among the actions");
+	}
+	std::string onlineLabel, onlineIn;
+	const bool online = menuHas(menubar, "app.learn-online", onlineLabel, onlineIn);
+	expect(online && onlineLabel == "Learn Logic _Online…" && onlineIn == "_Help",
+	       format("Help > Learn Logic Online… is in the menu bar (\"%s\" in \"%s\")", onlineLabel.c_str(), onlineIn.c_str()));
+	expect(std::string(kLearnOnlineUrl) == "https://cedarlogic.netlify.app/learn/", std::string("it opens ") + kLearnOnlineUrl);
 
 	printf("%s\n", gFailed == 0 ? "intro-check: all passed" : format("intro-check: %d failed", gFailed).c_str());
 	return gFailed == 0 ? 0 : 1;

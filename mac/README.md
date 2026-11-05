@@ -162,19 +162,28 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   sanitizers, `CL_SYNC_URL=<mock server>` to run the scenarios over HTTP
   too, `GATES=1` (after `build.sh`) to check the gate library's defaults
 - `sync-check.sh` -- the app's own sync hooks (`App/SyncHooks.swift`:
-  CryptoKit, Compression, URLSession, the secret in the Keychain or a 0600
-  file, flock) through
+  CryptoKit, Compression, URLSession, the secret sealed with a key the
+  Keychain keeps (`App/KeychainFile.swift`, through `/usr/bin/security` so
+  no update asks for the password; checked from a re-signed copy too) or a
+  0600 file, flock) through
   the engine's self-test, then, with the website's mock server
   (`CL_SITE=<cedarlogic-site>` or found beside this checkout), the same over
   HTTP and two real engines linking two libraries through it. The app
   draws Settings > Sync and its sheets with `CedarLogic --render-sync <dir>`,
   and the What's New tour's pages with `CedarLogic --render-whatsnew <dir>`,
-  and the Actions rail (`App/Actions.swift`) in whole windows -- open with a
+  and the Actions panel (`App/Actions.swift`, the "rail" in the code) in whole windows -- open with a
   label, mid-drag, folded, folded with its tab peeking (the pointer in the
   hot strip along the window's right edge, which slides it out), folded and
   slid out over the canvas, folded in focus mode, folded by itself in a narrow window, in
-  Simulation View, in the toolbar instead, the Customize sheet (and
-  searched) and Settings > Actions, light and dark -- with `CedarLogic --render-actions <dir>` (part of `--render-ui` too)
+  Simulation View, turned off, the Customize sheet (and
+  searched), light and dark -- with `CedarLogic --render-actions <dir>` (part of `--render-ui` too),
+  which also draws everything `CedarLogic --render-tour <dir>` does:
+  Settings > Actions (its two switches, Show the Actions panel and Open on
+  hover), the welcome's Actions panel page, What's New's card for it, About,
+  and each stop of Show Me Around (it starts by itself until it's been
+  seen once, after the welcome or What's New)
+  (`App/ShowMeAround.swift`), in a full-size and a small window and with
+  the panel off
 - `bar-test.sh` -- the toolbar with real mouse events: clicks (sloppy ones
   and top edges included), hover, tooltips, dragging, double-click to fill,
   focus mode's tab strip and full screen, PASS or FAIL for each
@@ -227,6 +236,13 @@ Checks, all without opening the app (`Tools/build-tools.sh` builds them):
   windows, a copy of the app with its own settings and home folder. `STATES_ONLY=damaged
   launch-selftest.sh 30` runs only the damaged circuits (an engine crash in
   `GUICircuit::createWire` on some, see docs/MAC-APP-AUDIT.md)
+- `usage-check.sh [--live]` -- the opt-in usage stats client
+  (`App/UsageReport.swift`) against a local stand-in of `/api/usage`:
+  snapshot, delta, ping, haveSnapshot false, DELETE, reports kept offline,
+  429, policy off, the 16 KB cap and the leak scan. Crash reports and usage
+  stats are off until the user says yes, asked once (welcome or an
+  update's sheet), changed in Settings > Privacy: see docs/PRIVACY.md.
+  `--render-privacy <dir>` draws the consent and Settings > Privacy
 - `launch-check.sh [runs]` -- real launches of the built app (a copy with
   settings and folders of its own, so yours are never touched): each must
   open its circuit window, quit by itself and print none of SwiftUI's

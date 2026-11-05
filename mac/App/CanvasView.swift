@@ -904,6 +904,9 @@ final class CanvasController: ObservableObject {
 
     // MARK: The CedarLogic interface
 
+    /// The window is in focus mode (its own state; set by CLWindow, read by usage stats).
+    var focusModeOn = false
+
     /// Simulation View: the dark live presentation; no editing while it's on.
     @Published var simView = false {
         didSet {
@@ -1044,7 +1047,12 @@ final class CanvasController: ObservableObject {
 
     /// Every command, whichever way it arrives: the menus, the canvas's own
     /// keys (Settings > Shortcuts), the toolbar and the shortcut list.
+    /// Counted for usage stats (once, if they're on).
     func perform(_ a: ShortcutAction) {
+        UsageStats.shared.counting(a.rawValue) { performCommand(a) }
+    }
+
+    private func performCommand(_ a: ShortcutAction) {
         // In a split, the side you last clicked takes the page commands.
         if splitFocus, let p = partner, a.actsOnPage { p.perform(a); return }
         switch a {

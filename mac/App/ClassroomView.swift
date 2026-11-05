@@ -127,7 +127,7 @@ struct ClassroomView: View {
         .frame(minWidth: 820, idealWidth: 960, minHeight: 560, idealHeight: 680)
         .preferredColorScheme(prefs.dark ? .dark : .light)
         .sheet(item: $center.sheet) { s in ClassroomSheetView(center: center, sheet: s, look: look, accent: accent) }
-        .onAppear { center.start() }
+        .onAppear { center.start(); UsageStats.shared.noteClassroom() }
     }
 
     private func openNews(_ n: CRNews) {

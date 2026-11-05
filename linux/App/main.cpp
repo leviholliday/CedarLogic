@@ -15,6 +15,7 @@
 #include "Intro.h"
 #include "Updater.h"
 #include "Welcome.h"
+#include "ShowMeAround.h"
 #include "Collections.h"
 #include "Dialogs.h"
 #include "Feedback.h"
@@ -27,6 +28,10 @@
 #include "SyncUI.h"
 #include "Library.h"
 #include "LibraryWindow.h"
+#include "Privacy.h"
+#include "CrashReports.h"
+#include "PrivacyCheck.h"
+#include "UsageStats.h"
 #include "FindBar.h"
 #include "Toolbar.h"
 #include "MenuBar.h"
@@ -50,6 +55,9 @@ GMenu* gWindowMenu = nullptr;   // Window's list of the open circuits
 GMenuModel* gMenubar = nullptr;
 bool gLibraryLoaded = false;
 GtkWidget* gSplash = nullptr;
+// Settings > General, "When CedarLogic opens: None" (Intro.h): this launch has
+// no launch screen, and its windows come in without their opening card.
+bool gStraightIn = false;
 // --screenshot <out.png>: once the window is up, draw it to a PNG and quit
 // (a check that a build really starts, drawing and all; used by CI).
 std::string gScreenshot;
@@ -59,7 +67,11 @@ int gTheme = -1;
 bool gSimView = false;
 // --show <what>: for the screenshot runs, a window to open and picture
 // instead of the circuit's (welcome:N, whatsnew:N, help, truth, feedback,
-// templates, tour, find).
+// templates, tour, find; walk:N Show Me Around at stop N, walksmall:N the
+// same in a 1024x600 window, walkoff:N with the Actions panel off;
+// whatsnewpanel What's New's Actions card; settingsoff Settings > Actions
+// with the panel off; privacy the updaters' "A small favour" sheet,
+// privacy:1 with its two switches; whatssent "See exactly what's sent").
 std::string gShow;
 // --lab-report <in.cdl> <out.pdf> [bw]: writes a lab report without a window.
 std::string gReportIn, gReportOut;
@@ -84,6 +96,13 @@ std::string gBenchHome;
 // (SessionCheck.cpp); as --bench-drag runs, with a home of its own.
 int gSession = 0;
 unsigned long long gSessionSeed = 1;
+// --settings-check <folder> <tag>: Settings' pages on this screen, pictured
+// and checked (SettingsCheck.cpp); a picture run otherwise.
+std::string gSettingsCheckDir, gSettingsCheckTag;
+// --menu-check <folder> <tag>: every menu's text, as it is and lit (Settings.h).
+std::string gMenuCheckDir, gMenuCheckTag;
+// --privacy-check: the consent in real windows, clicked with the real pointer (PrivacyCheck.h).
+bool gPrivacyCheck = false;
 
 // A window's picture, as a PNG.
 bool writeWindow(GtkWidget* top, const std::string& file) {
@@ -154,7 +173,7 @@ gboolean showCaptureCb(gpointer) {
 	GtkWidget* top = nullptr;
 	const std::string what = gShow.substr(0, gShow.find(':'));
 	if (what == "welcome") top = welcome::window();
-	else if (what == "whatsnew") top = whatsnew::window();
+	else if (what == "whatsnew" || what == "whatsnewpanel") top = whatsnew::window();
 	else if (what == "help") top = help::window();
 	else if (what == "truth") {
 		// A page with no truth table to make -- a clocked circuit with more
@@ -169,7 +188,9 @@ gboolean showCaptureCb(gpointer) {
 	else if (what == "templates") top = toplevelTitled("New from Template");
 	else if (what == "export") top = toplevelTitled("Export as Image");
 	else if (what == "report") top = toplevelTitled("Export Lab Report");
-	else if (what == "settings" || what == "sync") top = settings::window();
+	else if (what == "settings" || what == "settingsoff" || what == "sync") top = settings::window();
+	else if (what == "privacy") top = privacy::askWindow();
+	else if (what == "whatssent") top = privacy::whatsSentWindow();
 	else if (what == "synccode") top = toplevelTitled("Your sync code");
 	else if (what == "synclink" || what == "syncpair") top = toplevelTitled("Link this computer");
 	else if (what == "syncconfirm") top = toplevelTitled("Link this computer?");
@@ -207,6 +228,35 @@ gboolean showCaptureCb(gpointer) {
 	return G_SOURCE_REMOVE;
 }
 
+gboolean settingsCheckCb(gpointer) {
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	const int code = w ? settings::check(w, gSettingsCheckDir, gSettingsCheckTag) : 1;
+	fflush(stdout);
+	fflush(stderr);
+	_exit(code);
+	return G_SOURCE_REMOVE;
+}
+
+gboolean privacyCheckCb(gpointer) {
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	int code = 1;
+	guarded("the privacy check", [&] { code = privacycheck::consentCheck(w); });
+	fflush(stdout);
+	fflush(stderr);
+	_exit(code);
+	return G_SOURCE_REMOVE;
+}
+
+gboolean menuCheckCb(gpointer) {
+	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
+	int code = 1;
+	if (w) guarded("the menu check", [&] { code = settings::menuCheck(w, gMenuCheckDir, gMenuCheckTag); });
+	fflush(stdout);
+	fflush(stderr);
+	_exit(code);
+	return G_SOURCE_REMOVE;
+}
+
 gboolean showCb(gpointer) {
 	CircuitWindow* w = circuitWindows().empty() ? nullptr : circuitWindows().back();
 	if (w == nullptr) return G_SOURCE_REMOVE;
@@ -216,6 +266,20 @@ gboolean showCb(gpointer) {
 	g_timeout_add(1800, showCaptureCb, nullptr);
 	if (what == "welcome") { prefs().hasSeenWelcome = false; welcome::offer(w); welcome::pageForScreenshot(page); }
 	else if (what == "whatsnew") whatsnew::show(w, page);
+	// What's New's Actions chapter, its "Show or Hide It" card open.
+	else if (what == "whatsnewpanel") whatsnew::show(w, 4, true);
+	else if (what == "settingsoff") { prefs().actionsOn = false; actions::changed(); settings::show(w, settings::kActionsPage); }
+	// Show Me Around at a stop (ShowMeAround.h): in this window, in a small one, or with the panel off.
+	else if (what == "walk" || what == "walksmall" || what == "walkoff") {
+		if (what == "walkoff") { prefs().actionsOn = false; actions::changed(); }
+		if (what == "walksmall") gtk_window_resize(w->window(), 1024, 600);
+		static int stop = 0;
+		stop = page;
+		g_timeout_add(500, +[](gpointer) -> gboolean {
+			if (!circuitWindows().empty()) showme::preview(circuitWindows().back(), stop);
+			return G_SOURCE_REMOVE;
+		}, nullptr);
+	}
 	else if (what == "help") help::show(w, page > 0 ? "analysis" : "");
 	else if (what == "truth") w->makeTruthTable();
 	else if (what == "checkclocked") {
@@ -250,6 +314,9 @@ gboolean showCb(gpointer) {
 	else if (what == "export") w->exportImage();
 	else if (what == "report") w->exportReport();
 	else if (what == "settings") settings::show(w, page);
+	// The updaters' "A small favour" sheet (privacy:1 with its two switches), and "See exactly what's sent".
+	else if (what == "privacy") { prefs().hasSeenWelcome = true; privacy::presentSheet(w); if (page == 1) privacy::setChoosing(true); }
+	else if (what == "whatssent") privacy::showWhatsSent(w->window());
 	// The Actions rail (Rail.h's picture()), and its Customize window (:1 searched for "export").
 	else if (what == "rail") { if (w->rail()) w->rail()->picture(page); }
 	else if (what == "customize") actions::showCustomize(w, page == 1 ? "export" : "");
@@ -686,7 +753,10 @@ GMenuModel* buildMenubar() {
 	s = section(help);
 	add(s, "CedarLogic _Help", "win.help");
 	add(s, "_Keyboard Shortcuts", "win.shortcuts");
-	add(s, "Guided _Tour", "app.guided-tour");
+	// Where everything is in the window (ShowMeAround.h), then the logic lesson.
+	add(s, "_Show Me Around", "win.show-me-around");
+	add(s, "Learn Logic: Guided _Tour", "app.guided-tour");
+	add(s, "Learn Logic _Online…", "app.learn-online");
 	s = section(help);
 	add(s, "_What's New in CedarLogic", "win.whats-new");
 	add(s, "Play the _Intro", "app.play-intro");
@@ -928,13 +998,27 @@ void startupCb(GApplication* gapp, gpointer) {
 	// engine's settings, CSS) in German, French and other comma locales.
 	setlocale(LC_NUMERIC, "C");
 	sturdyUiFont();
+	// The wheel over a dropdown, number box or slider scrolls the page it's on instead.
+	wheelLeavesValuesAlone();
 	// Before the launch screen: it asks the settings whether this is the
 	// first launch ever (the slower one, with the sound).
 	prefs().load();
 	gPrimary = true;
+	// Picture and check runs: Show Me Around never starts by itself, the
+	// privacy question is never asked by itself, and no usage stats are sent.
+	showme::setQuiet(!gScreenshot.empty());
+	privacy::quiet = !gScreenshot.empty();
+	usagestats::testRun = !gScreenshot.empty() || !gSplashFile.empty();
+	// Crash reports, if they were said yes to (CrashReports.h): before anything else can go wrong;
+	// never in a picture or check run.
+	crashreports::start(!gScreenshot.empty() || !gSplashFile.empty() || !gReportIn.empty());
 	// Not for --screenshot: CI wants one deterministic frame, not a race
 	// with a timed splash.
-	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty()) gSplash = showSplash();
+	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty()) {
+		gStraightIn = intro::straightIn();
+		if (gStraightIn) intro::log("straight in: no launch screen");
+		else gSplash = showSplash();
+	}
 	if (gTheme >= 0) prefs().dark = gTheme == 1;
 	applyTheme();
 	loadCss();
@@ -977,6 +1061,11 @@ void startupCb(GApplication* gapp, gpointer) {
 		  nullptr, nullptr, nullptr, { 0 } },
 		{ "guided-tour", [](GSimpleAction*, GVariant*, gpointer app) { startTour(activeWindow(GTK_APPLICATION(app))); },
 		  nullptr, nullptr, nullptr, { 0 } },
+		// Help > Learn Logic Online…: the website's lessons, in the browser.
+		{ "learn-online", [](GSimpleAction*, GVariant*, gpointer app) {
+			CircuitWindow* w = activeWindow(GTK_APPLICATION(app));
+			openExternally(w ? w->window() : nullptr, kLearnOnlineUrl);
+		  }, nullptr, nullptr, nullptr, { 0 } },
 		// Help > Play the Intro: the first launch's, sound and all, over the front circuit window (Splash.h).
 		{ "play-intro", [](GSimpleAction*, GVariant*, gpointer app) {
 			if (CircuitWindow* w = activeWindow(GTK_APPLICATION(app))) guarded("the intro", [&] { splashPlayIntroNow(w->window()); });
@@ -1115,13 +1204,18 @@ void activateCb(GApplication* gapp, gpointer) {
 			// Where the intro played (Splash.h), so it dissolves into it.
 			if (c == circuitWindows().front()) splashPlaceUnder(c->window());
 			gtk_widget_show(GTK_WIDGET(c->window()));
-			if (gScreenshot.empty()) c->beginOpening();
+			if (gScreenshot.empty() && !gStraightIn) c->beginOpening();
 		}
+		// The launch's windows are in: any after them open with their card.
+		gStraightIn = false;
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
 			if (gSession > 0) g_timeout_add(1500, sessionCb, app);
 			else if (gBench > 0) g_timeout_add(1500, benchCb, app);
 			else if (!gCaptureTest.empty()) g_timeout_add(1500, captureTestCb, app);
+			else if (!gSettingsCheckDir.empty()) g_timeout_add(1500, settingsCheckCb, app);
+			else if (!gMenuCheckDir.empty()) g_timeout_add(1500, menuCheckCb, app);
+			else if (gPrivacyCheck) g_timeout_add(1500, privacyCheckCb, app);
 			else if (!gShow.empty()) g_timeout_add(1200, showCb, app);
 			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
@@ -1133,6 +1227,18 @@ void activateCb(GApplication* gapp, gpointer) {
 				return G_SOURCE_REMOVE;
 			}, app);
 		}
+		if (gScreenshot.empty()) {
+			// Crash reports and usage stats, asked once (Privacy.h): for anyone
+			// past the welcome who hasn't been, as a sheet over the circuit once
+			// it has the keys (after What's New, before Show Me Around).
+			guarded("the privacy question", [] { privacy::askWhenReady(); });
+			// Usage stats, if they're on: counted from here, sent in the background.
+			guarded("usage stats", [] { usagestats::start(); });
+		}
+		// Not seen yet: Show Me Around starts once a circuit window has the
+		// keyboard with nothing over it (after the welcome, What's New, the
+		// recovery question, the privacy question), never over the launch screen or the intro.
+		if (gScreenshot.empty()) guarded("Show Me Around", [] { showme::startWhenReady(); });
 		return G_SOURCE_REMOVE;
 	}, gapp);
 	gSplash = nullptr;
@@ -1181,13 +1287,18 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 			// Where the intro played (Splash.h), so it dissolves into it.
 			if (c == circuitWindows().front()) splashPlaceUnder(c->window());
 			gtk_widget_show(GTK_WIDGET(c->window()));
-			if (gScreenshot.empty()) c->beginOpening();
+			if (gScreenshot.empty() && !gStraightIn) c->beginOpening();
 		}
+		// The launch's windows are in: any after them open with their card.
+		gStraightIn = false;
 		if (!gScreenshot.empty()) {
 			if (gSimView) for (CircuitWindow* c : circuitWindows()) c->toggleSimView();
 			if (gSession > 0) g_timeout_add(1500, sessionCb, app);
 			else if (gBench > 0) g_timeout_add(1500, benchCb, app);
 			else if (!gCaptureTest.empty()) g_timeout_add(1500, captureTestCb, app);
+			else if (!gSettingsCheckDir.empty()) g_timeout_add(1500, settingsCheckCb, app);
+			else if (!gMenuCheckDir.empty()) g_timeout_add(1500, menuCheckCb, app);
+			else if (gPrivacyCheck) g_timeout_add(1500, privacyCheckCb, app);
 			else if (!gShow.empty()) g_timeout_add(1200, showCb, app);
 			else g_timeout_add(gHold * 1000, screenshotCb, app);
 		}
@@ -1199,6 +1310,18 @@ void openFilesCb(GApplication* gapp, GFile** files, gint n, const gchar*, gpoint
 				return G_SOURCE_REMOVE;
 			}, app);
 		}
+		if (gScreenshot.empty()) {
+			// Crash reports and usage stats, asked once (Privacy.h): for anyone
+			// past the welcome who hasn't been, as a sheet over the circuit once
+			// it has the keys (after What's New, before Show Me Around).
+			guarded("the privacy question", [] { privacy::askWhenReady(); });
+			// Usage stats, if they're on: counted from here, sent in the background.
+			guarded("usage stats", [] { usagestats::start(); });
+		}
+		// Not seen yet: Show Me Around starts once a circuit window has the
+		// keyboard with nothing over it (after the welcome, What's New, the
+		// recovery question, the privacy question), never over the launch screen or the intro.
+		if (gScreenshot.empty()) guarded("Show Me Around", [] { showme::startWhenReady(); });
 		return G_SOURCE_REMOVE;
 	}, gapp);
 	gSplash = nullptr;
@@ -1399,6 +1522,28 @@ int main(int argc, char** argv) {
 		if (strcmp(argv[i], "--dark") == 0 || strcmp(argv[i], "--light") == 0) { gTheme = strcmp(argv[i], "--dark") == 0; continue; }
 		if (strcmp(argv[i], "--sim-view") == 0) { gSimView = true; continue; }
 		if (strcmp(argv[i], "--show") == 0 && i + 1 < argc) { gShow = argv[++i]; continue; }
+		if (strcmp(argv[i], "--menu-check") == 0 && i + 2 < argc) {
+			gMenuCheckDir = argv[++i];
+			gMenuCheckTag = argv[++i];
+			if (gScreenshot.empty()) gScreenshot = gMenuCheckDir + "/unused.png";   // runs as a picture run does
+			continue;
+		}
+		// Usage stats' engine against a stand-in or the site's draft (PrivacyCheck.h): no window.
+		if (strcmp(argv[i], "--usage-check") == 0) { usagestats::testRun = true; return privacycheck::usageCheck(); }
+		// Crash reports: the cleaning and Sentry starting and stopping (CrashReports.h); no window.
+		if (strcmp(argv[i], "--crash-check") == 0) { prefs().load(); return crashreports::selfTest(); }
+		if (strcmp(argv[i], "--usage-live") == 0) { usagestats::testRun = true; return privacycheck::usageLive(); }
+		if (strcmp(argv[i], "--privacy-check") == 0) {
+			gPrivacyCheck = true;
+			if (gScreenshot.empty()) gScreenshot = std::string(g_get_tmp_dir()) + "/cl-privacy-unused.png";   // runs as a picture run does
+			continue;
+		}
+		if (strcmp(argv[i], "--settings-check") == 0 && i + 2 < argc) {
+			gSettingsCheckDir = argv[++i];
+			gSettingsCheckTag = argv[++i];
+			if (gScreenshot.empty()) gScreenshot = gSettingsCheckDir + "/unused.png";   // runs as a picture run does
+			continue;
+		}
 		if (strcmp(argv[i], "--lab-report") == 0 && i + 2 < argc) {
 			gReportIn = argv[++i];
 			gReportOut = argv[++i];
@@ -1423,7 +1568,7 @@ int main(int argc, char** argv) {
 			if (i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9') gSessionSeed = strtoull(argv[++i], nullptr, 10);
 			continue;
 		}
-		// --render-intro <dir> [first|update|every] [--behind <png>]: the intro's frames at 60 fps, with no display (Intro.h).
+		// --render-intro <dir> [first|update|every|short] [--behind <png>]: the intro's frames at 60 fps, with no display (Intro.h).
 		if (strcmp(argv[i], "--render-intro") == 0 && i + 1 < argc) {
 			const std::string dir = argv[i + 1];
 			intro::Trigger trigger = intro::Trigger::First;
@@ -1431,10 +1576,13 @@ int main(int argc, char** argv) {
 			for (int j = i + 2; j < argc; j++) {
 				if (strcmp(argv[j], "update") == 0) trigger = intro::Trigger::Update;
 				else if (strcmp(argv[j], "every") == 0) trigger = intro::Trigger::Every;
+				else if (strcmp(argv[j], "short") == 0) trigger = intro::Trigger::Short;
 				else if (strcmp(argv[j], "--behind") == 0 && j + 1 < argc) behind = argv[++j];
 			}
 			return intro::render(dir, trigger, behind);
 		}
+		// --intro-bench [WxH ...]: how long the intro's frames take to draw, by part (Splash.h).
+		if (strcmp(argv[i], "--intro-bench") == 0) return introBench(std::vector<std::string>(argv + i + 1, argv + argc));
 		if (strcmp(argv[i], "--splash-frame") == 0 && i + 2 < argc) { gSplashAt = atof(argv[++i]); gSplashFile = argv[++i]; continue; }
 		// --sync-test [--server <url>] [--only <name>]: the sync engine's own self-test with this
 		// machine's hooks (libcrypto, zlib, curl); with a server, also against a mock one.
@@ -1535,6 +1683,9 @@ int main(int argc, char** argv) {
 	// A launch that handed over never loaded the settings: saving its
 	// defaults would undo the running one's.
 	if (gPrimary) prefs().save();
+	// What usage stats counted this time (when they're on), written down.
+	if (gPrimary) usagestats::shutdown();
+	if (gPrimary) crashreports::shutdown();
 	// Every window is closed and saved: what sync hasn't sent yet goes now (five seconds at most).
 	if (gPrimary) syncapp::quit();
 	g_object_unref(app);

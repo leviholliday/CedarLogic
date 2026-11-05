@@ -1,4 +1,5 @@
-// The Actions rail (the Mac's ActionsRail, mac/App/Actions.swift): a strip
+// The Actions panel, "the rail" in the code (the Mac's ActionsRail,
+// mac/App/Actions.swift; Settings > Actions > Show the Actions panel): a strip
 // down the circuit window's right edge, the side panel's mirror, of the
 // actions chosen in Settings > Actions (Actions.h), each an icon. Resting on
 // one shows its name and shortcut beside it; a click runs it. Pressing one
@@ -9,14 +10,19 @@
 // window narrower than 900 points it folds by itself; in focus mode it folds
 // to a quieter tab (not hidden), and comes back as it was afterwards.
 //
-// Folded, with "Open it when the mouse reaches the right edge" on (as it is
-// to begin with): a 12-point strip the height of the canvas along the
+// Folded, with Settings > Actions > "Open on hover" on (as it is to begin
+// with): a 12-point strip the height of the canvas along the
 // window's right edge -- its last column of pixels too -- lights the tab at
 // once; 100 ms there slides the rail out over the canvas (passing through
 // doesn't), where it stays while the pointer is on it or the strip and goes
 // 400 ms after it has left both, but not while its right-click menu is open
-// or a drag is going on. Escape puts it back. Its right-click menu: Customize
-// Actions..., fold or show it, the actions in the toolbar instead, or none.
+// or a drag is going on. Escape puts it back. The strip only watches the
+// pointer (it's no window): a press there, the wheel, and a drag begun
+// there are the canvas's (the peeking tab passes them through, all but its
+// own 6 points), and while the canvas has the pointer (a drag) the rail
+// doesn't come out. Its right-click menu: Customize
+// Actions..., fold or show it, or Turn Off the Actions Panel. Show Me Around
+// (ShowMeAround.h) opens a folded panel for its stop, and it folds back after.
 
 #ifndef CL_WINDOWS_RAIL_H
 #define CL_WINDOWS_RAIL_H
@@ -33,10 +39,11 @@ public:
 	ActionsRail(CircuitWindow* window, HWND parent);
 	~ActionsRail() override;
 
-	bool onScreen() const { return prefs().actionsMode == 0; }
+	bool onScreen() const { return prefs().actionsOn; }
 	// Folded to its tab: as it was left, or by itself (a narrow window,
-	// focus mode) unless its tab was clicked there.
-	bool folded() const { return (prefs().actionsCollapsed || narrow || focus) && !peek; }
+	// focus mode) unless its tab was clicked there -- and never at Show Me
+	// Around's stop for it.
+	bool folded() const;
 	bool slidOut() const { return hov.slidOut; }
 	// On screen and open, pinned or slid out (View > Hide Actions then).
 	bool showing() const { return onScreen() && (!folded() || hov.slidOut); }
@@ -80,13 +87,12 @@ public:
 		float dragDy = 0;
 	};
 	static Picture picture;
-	// Off for test and picture runs: the pointer's place isn't looked at,
-	// and the one-time status line waits for a real launch.
+	// Off for test and picture runs: the pointer's place isn't looked at.
 	static bool watchPointer;
-	static bool quiet;
 
 protected:
 	void paint(ID2D1RenderTarget* rt, float w, float h) override;
+	LRESULT hitTest(float x, float y) override;
 	void mouseMove(float x, float y) override;
 	void mouseLeave() override;
 	void mouseDown(int button, float x, float y, bool doubleClick) override;
@@ -121,9 +127,6 @@ private:
 	std::string labelId;
 	WindowSurface labelSurface;
 	std::string tipsFor;            // the tooltips' state, as last set
-	// The status line for an earlier install, once.
-	double hintAt = -1;
-	int hintTries = 0;
 
 	double slideAmount() const;
 	void startSlide(bool out, double now);

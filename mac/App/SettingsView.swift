@@ -2,13 +2,13 @@
 // pages in the toolbar, the window easing to each page's height as you switch,
 // and each setting a label on the left with its control and a line of
 // explanation on the right: General, Appearance, Canvas, Toolbar, Shortcuts,
-// Sync (SyncSettingsView.swift).
+// Sync (SyncSettingsView.swift), Privacy (Privacy.swift).
 
 import AppKit
 import SwiftUI
 
 enum SettingsPage: String, CaseIterable, Identifiable {
-    case general, appearance, canvas, toolbar, actions, shortcuts, sync
+    case general, appearance, canvas, toolbar, actions, shortcuts, sync, privacy
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -19,6 +19,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .actions: "Actions"
         case .shortcuts: "Shortcuts"
         case .sync: "Sync"
+        case .privacy: "Privacy"
         }
     }
     var icon: String {
@@ -30,6 +31,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .actions: "sidebar.right"
         case .shortcuts: "keyboard"
         case .sync: "arrow.triangle.2.circlepath"
+        case .privacy: "hand.raised"
         }
     }
 }
@@ -231,12 +233,13 @@ enum SettingsView {
         case .actions: CLActionsSettings()
         case .shortcuts: CLShortcutSettings()
         case .sync: SyncSettingsView(center: SyncCenter.shared)
+        case .privacy: PrivacySettingsView()
         }
     }
 }
 
 /// One setting: "Label:" on the left, the control and a line of help on the right.
-private struct Row<Control: View>: View {
+struct Row<Control: View>: View {
     let label: String
     let hint: String?
     @ViewBuilder let control: () -> Control
@@ -264,16 +267,26 @@ private struct Row<Control: View>: View {
     }
 }
 
-private struct Page<C: View>: View {
+struct Page<C: View>: View {
     @ViewBuilder let content: () -> C
     var body: some View { VStack(alignment: .leading, spacing: 12) { content() } }
 }
 
 struct GeneralSettingsView: View {
-    @AppStorage(CrashReports.key) private var crashReports = false
     @ObservedObject private var prefs = Prefs.shared
     @State private var opensCDL = CDLHandler.isUs
     @State private var cdlApp = CDLHandler.currentName
+
+    /// What each "When CedarLogic opens" choice does.
+    private var launchHint: String {
+        let always = " The first launch and the first after an update always play the full intro, with its sound. Help > Play the Intro plays it any time."
+        switch prefs.introAtLaunch {
+        case .short: return "The circuit draws itself, then the window opens: about three and a half seconds, silent." + always
+        case .full: return "The circuit draws itself, then the launch screen, as on the first launch, without its sound." + always
+        case .classic: return "The launch screen as it was before the intro: CedarLogic's panel, a sweep of light, and the window, silent." + always
+        case .none: return "Straight into the circuit window, no launch screen." + always
+        }
+    }
 
     var body: some View {
         Page {
@@ -320,8 +333,11 @@ struct GeneralSettingsView: View {
                 }
                 .disabled(opensCDL)
             }
-            Row("Launch screen", hint: "The circuit drawing itself, then the launch screen, as on the first launch, without its sound (that's for the first launch and updates). Help > Play the Intro plays it any time.") {
-                Toggle("Play the intro every time CedarLogic opens", isOn: $prefs.introEveryLaunch)
+            Row("Launch screen", hint: launchHint) {
+                Picker("When CedarLogic opens", selection: $prefs.introAtLaunch) {
+                    ForEach(Intro.AtLaunch.allCases) { Text($0.title).tag($0) }
+                }
+                .fixedSize()
             }
             Row("Quitting", hint: "⌘Q shows a question in the middle of the screen first: Return quits, Escape doesn't.") {
                 Toggle("Ask before quitting", isOn: $prefs.confirmQuit)
@@ -336,12 +352,6 @@ struct GeneralSettingsView: View {
                     }
                     .labelsHidden().fixedSize()
                     Button("Check Now") { Updates.shared.checkNow() }
-                }
-            }
-            if CrashReports.available {
-                Row("Crash reports", hint: "If CedarLogic crashes, a report of where it went wrong goes to its developer. Never your circuits, files or name.") {
-                    Toggle("Send crash reports", isOn: $crashReports)
-                        .onChange(of: crashReports) { _, on in CrashReports.set(on) }
                 }
             }
         }

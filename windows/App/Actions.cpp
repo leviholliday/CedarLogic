@@ -130,7 +130,10 @@ const std::vector<Def>& all() {
 		// Help
 		{ "help", "CedarLogic Help", "Help", 0xE897, CMD_HELP },
 		{ "shortcuts", "Keyboard Shortcuts", "Help", 0xE765, CMD_SHORTCUTS },
-		{ "tour", "Guided Tour", "Help", 0xE7C1, CMD_TOUR },
+		{ "showMeAround", "Show Me Around", "Help", 0xE890, CMD_SHOW_ME_AROUND },
+		{ "tour", "Learn Logic: Guided Tour", "Help", 0xE7C1, CMD_TOUR },
+		// More lessons, with live circuits, on the website (in the browser).
+		{ "learnOnline", "Learn Logic Online…", "Help", 0xE774, CMD_LEARN_ONLINE },
 		{ "welcome", "Welcome to CedarLogic…", "Help", 0xE734, CMD_WELCOME },
 		{ "whatsNew", "What's New in CedarLogic", "Help", 0xE789, CMD_WHATS_NEW },
 		{ "playIntro", "Play the Intro", "Help", 0xE714, CMD_PLAY_INTRO },
@@ -286,6 +289,28 @@ bool matches(const Def& d, const std::string& query) {
 void changed() {
 	prefs().save();
 	for (CircuitWindow* w : circuitWindows()) w->actionsChanged();
+}
+
+const char* const kShowSwitch = "Show the Actions panel";
+const char* const kHoverSwitch = "Open on hover";
+
+std::string showHint() {
+	return "The commands you use most, down the right edge of the window. Rest on one for its name and shortcut, click to run it, "
+	       "drag it up or down to move it.";
+}
+
+std::string offHint() {
+	return "Everything is still in the menus, with its shortcut. View \u25B8 Show Actions" + shortcuts::tipKeys(CMD_TOGGLE_ACTIONS) +
+	       " turns it back on.";
+}
+
+std::string hoverHint() {
+	return "When the panel is folded, move the pointer to the window\u2019s right edge and it slides out. Move away and it goes back.";
+}
+
+std::string foldHint() {
+	return "Click the panel\u2019s left edge to fold it away, or use View \u25B8 Hide Actions" + shortcuts::tipKeys(CMD_TOGGLE_ACTIONS) +
+	       ". Right-click it to change what\u2019s on it. Help \u25B8 Show Me Around points it out.";
 }
 
 bool enabled(const CircuitWindow* w, const Def& d) {

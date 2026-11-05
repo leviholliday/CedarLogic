@@ -76,21 +76,22 @@ struct Prefs {
 	bool showTitle = true;        // the circuit's name at the toolbar's left
 	bool showThemeToggle = false; // a dark mode switch in the toolbar
 	bool showStepClock = true;    // Step Clock in the toolbar and Simulation View's bar
-	// The Actions rail (Actions.h, Rail.h), as the Mac's cl.actions.*: where
-	// the actions go (0 the rail on screen, 1 in the toolbar, 2 hidden); the
-	// rail folded to its tab, as it was left; folded, it slides out when the
-	// pointer reaches the window's right edge; every action's id in the
-	// Customize list's order ("" the default), comma separated; the ticked
-	// ones (actionsShownSet: saved, else the default six); and an earlier
-	// install, told once where the rail is (its window stays as it was).
-	// New installs get the rail on screen; settings from before it, Hidden
-	// (Prefs::loadFrom).
-	int actionsMode = 0;
+	// The Actions panel (the "rail" in the code: Actions.h, Rail.h), as the
+	// Mac's cl.actions.*: Settings > Actions > Show the Actions panel (the
+	// strip down the window's right edge, or none: everything is still in
+	// the menus); the panel folded to its tab, as it was left; Settings >
+	// Actions > Open on hover (folded, it slides out when the pointer reaches
+	// the window's right edge); every action's id in the Customize list's
+	// order ("" the default), comma separated; and the ticked ones
+	// (actionsShownSet: saved, else the default six). 0.4 turned it on, and
+	// unfolded it, once for everyone (Prefs::loadFrom: actionsOn04,
+	// actionsOpen04, as the Mac's cl.actions.on04 and cl.actions.open04);
+	// after that both are theirs.
+	bool actionsOn = true;
 	bool actionsCollapsed = false;
 	bool actionsHoverOpen = true;
 	std::string actionsOrder, actionsShown;
 	bool actionsShownSet = false;
-	bool actionsHint = false;
 	bool openReplaces = true;     // opening a circuit replaces the one in the window (the Mac's default)
 	std::string newTemplate;      // what Ctrl+N starts from: a template's id, or "" for a blank page
 	int templateClock = 0;        // New from Template's Clock line: 0 manual (Step Clock), 1 running, 2 a pulse button
@@ -104,14 +105,20 @@ struct Prefs {
 	bool testingGroupNotice = false;   // made a beta tester that way: the updater says so once
 	std::string installedRelease;      // the versioned release the updater last installed, "<tag> <build>": never offered again
 	bool hasSeenWelcome = false;
+	// Help > Show Me Around (ShowMeAround.h) has been finished or skipped once:
+	// until then it starts by itself (the Mac's cl.showMeAroundSeen).
+	bool showMeAroundSeen = false;
 	bool firstLaunchPlayed = false;               // the launch screen's sound, once ever
 	// The intro (Intro.cpp), played once each: the first launch's, and an
 	// update's (the What's New version it introduced).
 	bool introFirstLaunchPlayed = false;
 	std::string introUpdatePlayed;
-	// Settings > General > Launch screen: the intro at every launch, not just
-	// the first (silently; the sound is the first launch's and an update's).
-	bool introEveryLaunch = false;
+	// Settings > General > "When CedarLogic opens" (intro::AtLaunch): 0 the
+	// short intro (everyone's to begin with), 1 the full intro, 2 the classic
+	// launch screen, 3 none; silent, whichever (the sound is the first
+	// launch's and an update's). Settled once from 0.4's earlier checkbox,
+	// "Play the intro every time CedarLogic opens" (Prefs::loadFrom).
+	int introAtLaunch = 0;
 	int windowWidth = 1180, windowHeight = 780;   // in 96-dpi units
 	bool windowMaximized = false;
 	int paletteWidth = 210;                       // in 96-dpi units
@@ -142,6 +149,14 @@ struct Prefs {
 	bool confirmQuit = true;                      // Ctrl+Q asks first
 	std::string seenWhatsNew;                     // the version What's New was last shown for
 	int startMenu = 0;                            // a copy from the zip: 0 not asked, 1 added to Start, 2 not wanted
+	// Crash reports and usage stats (Privacy.h, docs/PRIVACY.md), asked once,
+	// as the Mac's cl.crashReports, cl.usageStats, cl.privacyAsked and
+	// cl.privacyChoice. The usage id and what's counted are in
+	// %APPDATA%\CedarLogic\Usage\usage.json (UsageReport.h), not here.
+	int crashReports = -1;                        // -1 not chosen yet, 0 off, 1 on
+	bool usageStats = false;                      // the switch
+	bool privacyAsked = false;
+	std::string privacyChoice;                    // "yes", "no" or "custom" ("" not asked)
 
 	double wireScale() const;
 	void load();
@@ -294,6 +309,8 @@ void chooseAndOpen(CircuitWindow* from);
 void openPracticeCircuit(CircuitWindow* from);
 // Open a URL or a file in its default app.
 void openExternally(HWND parent, const std::string& target);
+// Help > Learn Logic Online…: the website's lessons (the Mac's AppActions.learnOnlineURL).
+const char* const kLearnOnlineUrl = "https://cedarlogic.netlify.app/learn/";
 // Handle a key the whole app answers to (Ctrl+S, Ctrl+Tab...). True when it
 // was one.
 bool handleShortcut(CircuitWindow* w, const MSG& msg);

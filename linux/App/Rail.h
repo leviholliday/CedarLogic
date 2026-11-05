@@ -1,4 +1,4 @@
-// The Actions rail on a circuit window's right edge (the Mac's ActionsRail
+// The Actions panel (the "rail" in the code) on a circuit window's right edge (the Mac's ActionsRail
 // and ActionsWindowParts, mac/App/Actions.swift): the palette's mirror, a
 // strip of the chosen actions (Actions.h), each named with its shortcut as
 // the pointer rests on it. A click runs it; dragging one up or down (6
@@ -39,13 +39,12 @@ public:
 	// At the row's end, once everything else is in it.
 	void addDock(GtkWidget* row);
 
-	// The mode, the order, the choice or a setting changed (Actions.h's changed()).
+	// On or off, the order, the choice or a setting changed (Actions.h's changed()).
 	void refresh();
 	void tick();
 	void setFocus(bool on);
-	// View > Show/Hide Actions (F9): with the actions somewhere else (or
-	// nowhere), the rail on screen and open; slid out, back in; folded,
-	// open; open, folded.
+	// View > Show/Hide Actions (F9): with the panel off, on and open; slid
+	// out, back in; folded, open; open, folded.
 	void toggle();
 	// On screen and open (What's New's Show the Actions).
 	void showOpen();
@@ -58,7 +57,7 @@ public:
 
 	// --show rail:N (CI's pictures): 0 open with a label, 1 folded, 2 the
 	// tab peeking, 3 slid out with a label, 4 mid-drag, 5 focus mode, 6 focus
-	// mode slid out, 7 a narrow window, 8 Simulation View, 9 in the toolbar,
+	// mode slid out, 7 a narrow window, 8 Simulation View, 9 turned off,
 	// 10 focus mode peeking.
 	void picture(int kind);
 
@@ -68,6 +67,7 @@ public:
 	int itemCount() const { return (int)items.size(); }
 	// The hover's state, for a FAIL line.
 	std::string describe() const;
+	void clearTrace() { trace.clear(); }
 	// An item's middle, in the dock's points.
 	void itemCenter(int i, double& x, double& y) const;
 
@@ -80,6 +80,16 @@ private:
 	class RailView* floater = nullptr;
 	class RailLabels* labels = nullptr;
 	GtkEventController* motion = nullptr;
+	// Every press over the window, before what's under it: a press anywhere
+	// but the rail (the canvas, in the hot strip) keeps the edge from
+	// peeking or sliding the rail out over it until the button's up.
+	GtkGesture* presses = nullptr;
+	bool buttonDown = false;
+	// What the edge saw last (for a session check's FAIL line).
+	std::string trace;
+	void note(const std::string& what);
+	static void pressedCb(GtkGestureMultiPress*, int, double, double, gpointer self);
+	static void releasedCb(GtkGestureMultiPress*, int, double, double, gpointer self);
 	GtkWidget* menu = nullptr;
 
 	actions::FoldState fold;
@@ -102,9 +112,6 @@ private:
 	double pressX = 0, pressY = 0, pressAt = 0;
 	bool held = false, dragging = false;
 	double dragDy = 0;
-	// The one-time line for those who had CedarLogic before the rail.
-	double hintAt = -1;
-	int hintTries = 0;
 	// The pictures.
 	bool pictureFold = false, picturePeek = false, pictureSlid = false;
 	int pictureLabel = -1, pictureDrag = -1;

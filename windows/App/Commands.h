@@ -59,11 +59,16 @@ enum Command {
 	CMD_PROJECTOR,
 	// Simulate > Predict, Then Reveal and Reveal (Cover the Lights Again), as the Mac's.
 	CMD_PREDICT, CMD_REVEAL,
-	// The Actions rail (Rail.h): View > Show/Hide Actions, and the rail's
+	// The Actions panel (Rail.h): View > Show/Hide Actions, and the rail's
 	// right-click Customize Actions... (the sheet).
 	CMD_TOGGLE_ACTIONS, CMD_CUSTOMIZE_ACTIONS,
 	// Help > Play the Intro (Intro.h): the first launch's intro again, over this window.
 	CMD_PLAY_INTRO,
+	// Help > Show Me Around (ShowMeAround.h): a spotlight walk round the window.
+	CMD_SHOW_ME_AROUND,
+	// Help > Learn Logic Online…: the website's lessons, with live circuits,
+	// in the browser (kLearnOnlineUrl, App.h).
+	CMD_LEARN_ONLINE,
 	CMD_RECENT = 1900,
 	CMD_RECENT_LAST = 1909,
 	// Window > the open circuits (CMD_WINDOW_LIST + i).

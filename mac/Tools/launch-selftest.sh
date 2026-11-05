@@ -8,24 +8,46 @@
 # (your settings and Your Circuits are never touched; Classroom, the
 # updater and crash reports pointed at addresses nothing answers) is set up
 # in each saved state and then "launched" with --launch-selftest, `rounds`
-# times over (default 3, so 39 launches): the welcome / What's New choice,
+# times over (default 3, so 57 launches): the welcome / What's New choice,
 # which circuit reopens and that it opens, Your Circuits, versions, Sync and
 # Classroom starting offline, the updater and crash reports with no network
-# ("offline"), (the "damaged" state) damaged circuits, and where the Actions
-# rail is: on screen for a first launch, hidden for anyone before, folded as
-# it was left ("actions"), and the toolbar's six buttons in toolbar mode.
-# No window opens. A launch
+# ("offline"), (the "damaged" state) damaged circuits, and the Actions
+# panel: on for a first launch and for every earlier install (0.4's one-time
+# migration, the old In the toolbar and Hidden modes included: "migrated"),
+# a choice made after it kept ("paneloff"), folded as it was left
+# ("actions"), unfolded once for 0.4 (the owner's settings: "owner"),
+# "When CedarLogic opens" (the short intro for new and earlier installs,
+# 0.3's checkbox turned off kept as the classic launch screen: "introoff";
+# None chosen: "intronone"; the first launch and an update still the full
+# intro, with the sound; the choice kept), and
+# Show Me Around: its stops, keys and Escape in a real window off screen,
+# the folded panel opening for its stop, starting by itself after each of
+# the welcome's ways out (the lesson after it), never again once seen, and
+# the one consent for crash reports and usage stats: the welcome's "A small
+# favour" page, Settings > Privacy, the sheet owed to updaters once, an
+# earlier yes to crash reports kept, crash reports' old question gone, and a
+# leak scan of a real usage report ("privacy"). No window opens. A launch
 # passes when it exits 0 within 60 s.
 #
 # FOCUS=1 then also launches the copy for real (through `open`, as the Dock
-# does) in the first, normal and updated states (FOCUS_STATES to choose),
+# does) in the first, normal, updated, introoff and intronone states
+# (FOCUS_STATES to choose),
 # `rounds` times each: its windows show on screen for about 8 s each, and
 # nothing is clicked. Once the launch screen has gone, and the welcome or
 # What's New has been closed, the circuit window must be the key window, its
-# canvas must have the keyboard, File > Export as Image… must be enabled and
+# canvas must have the keyboard (and the intro that played must be the full
+# one, with the sound, in first and updated, the short one, silent, in
+# normal, none in introoff (the classic launch screen) and intronone (no
+# launch screen at all)), File > Export as Image… must be enabled and
 # its key (⌘E, sent through the app's own event queue) must ask for the
 # export (LaunchFocusCheck); then the same after another window has been in front
-# for a moment. It takes the keyboard for those seconds: run it when you're
+# for a moment; the privacy question as a sheet on the circuit window
+# (first and updated), once, before Show Me Around, and none in normal;
+# Show Me Around starting by itself once the circuit window
+# has the keys (after the welcome or What's New) and Escape ending it for
+# good; and Help > Show Me Around is in the menu bar, and the walk
+# on the real window steps with → and ← and ends with Escape (keys sent
+# through the event queue, nothing clicked). It takes the keyboard for those seconds: run it when you're
 # not typing elsewhere (a launch macOS keeps from the front, as with the
 # screen locked, is a SKIP). HEADLESS=0 FOCUS=1: only those launches.
 set -uo pipefail
@@ -33,7 +55,7 @@ cd "$(dirname "$0")/../.."
 SRC=mac/build/CedarLogic.app
 [ -d "$SRC" ] || { echo "Build first: mac/build.sh"; exit 1; }
 ROUNDS=${1:-3}
-STATES=(first normal updated nolibrary missinglast corruptlast emptylast unsaved brokenlibrary damaged offline trash actions)
+STATES=(first normal updated nolibrary missinglast corruptlast emptylast unsaved brokenlibrary damaged offline trash actions migrated paneloff owner introoff intronone privacy)
 # STATES_ONLY="damaged" mac/Tools/launch-selftest.sh 40: only those states.
 [ -n "${STATES_ONLY:-}" ] && read -ra STATES <<<"$STATES_ONLY"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/cl-launch-selftest.XXXXXX")
@@ -86,7 +108,7 @@ done
 # The real launches (FOCUS=1): through Launch Services, so the copy is
 # brought forward the way a click in the Dock brings it.
 if [ "${FOCUS:-0}" = 1 ]; then
-	read -ra FSTATES <<<"${FOCUS_STATES:-first normal updated}"
+	read -ra FSTATES <<<"${FOCUS_STATES:-first normal updated introoff intronone}"
 	for r in $(seq 1 "$ROUNDS"); do
 		for s in "${FSTATES[@]}"; do
 			n=$((n + 1))

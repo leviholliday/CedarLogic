@@ -3,6 +3,7 @@
 #include "App.h"
 #include "Actions.h"
 #include "Alert.h"
+#include "Intro.h"
 #include "Library.h"
 #include "Settings.h"
 #include "Window.h"
@@ -82,10 +83,11 @@ ChannelStart startingChannel(bool prefsExisted, bool hasChannel, int storedChann
 	return { 0, false };
 }
 
-ActionsStart actionsStart(bool usedBefore, bool hasMode, int storedMode, bool storedHint) {
-	if (hasMode) return { std::min(std::max(storedMode, 0), 2), storedHint };
-	if (usedBefore) return { 2, true };
-	return { 0, false };
+ActionsStart actionsStart(bool existed, bool migrated, bool storedOn, bool opened, bool storedCollapsed) {
+	ActionsStart a{ true, false };
+	if (existed && migrated) a.on = storedOn;
+	if (existed && opened) a.collapsed = storedCollapsed;
+	return a;
 }
 
 // What linux/install.sh wrote for the group this install starts in ("beta"
@@ -111,14 +113,18 @@ void Prefs::load() {
 		channelNotice = c.notice;
 	}
 	{
-		// Before anything here is read: had CedarLogic been used? (Every save
-		// writes brandAccentSet; an older file has the welcome seen at least.)
-		const bool usedBefore = existed && (g_key_file_has_key(k, kGroup, "brandAccentSet", nullptr) || readBool(k, "hasSeenWelcome", false));
-		const bool hasMode = existed && g_key_file_has_key(k, kGroup, "actionsMode", nullptr);
-		const ActionsStart a = actionsStart(usedBefore, hasMode, hasMode ? readInt(k, "actionsMode", 0, 0, 2) : 0,
-		                                    hasMode && readBool(k, "actionsHint", false));
-		actionsMode = a.mode;
-		actionsHint = a.hint;
+		// 0.4's one-time steps (actionsStart): the old actionsMode and
+		// actionsHint are read no more, and go with the next save.
+		const ActionsStart a = actionsStart(existed, existed && readBool(k, "actionsOn04", false), existed && readBool(k, "actionsOn", true),
+		                                    existed && readBool(k, "actionsOpen04", false), existed && readBool(k, "actionsCollapsed", false));
+		actionsOn = a.on;
+		actionsCollapsed = a.collapsed;
+		showMeAroundSeen = existed && readBool(k, "showMeAroundSeen", false);
+		crashReports = existed ? readInt(k, "crashReports", -1, -1, 1) : -1;
+		usageStats = existed && readBool(k, "usageStats", false);
+		privacyAsked = existed && readBool(k, "privacyAsked", false);
+		privacyChoice = existed ? readString(k, "privacyChoice", "") : std::string();
+		if (privacyChoice != "yes" && privacyChoice != "no" && privacyChoice != "custom") privacyChoice.clear();
 		auto list = [&](const char* key, std::vector<std::string>& out) {
 			gsize n = 0;
 			gchar** v = existed ? g_key_file_get_string_list(k, kGroup, key, &n, nullptr) : nullptr;
@@ -130,7 +136,6 @@ void Prefs::load() {
 		};
 		list("actionsOrder", actionsOrder);
 		if (!list("actionsShown", actionsShown)) actionsShown = actions::defaults();
-		actionsCollapsed = existed && readBool(k, "actionsCollapsed", false);
 		actionsHoverOpen = !existed || readBool(k, "actionsHoverOpen", true);
 	}
 	if (existed) {
@@ -166,7 +171,12 @@ void Prefs::load() {
 		classicTabs = readBool(k, "classicTabs", classicTabs);
 		wireValueTag = readBool(k, "wireValueTag", wireValueTag);
 		confirmQuit = readBool(k, "confirmQuit", confirmQuit);
-		openReplaces = readBool(k, "openReplaces", openReplaces);
+		// Replacing the circuit you're in is the default, as on the Mac and
+		// Windows. Builds before this one wrote "false" whether or not anyone
+		// chose it, so those files take the default once; a choice made in
+		// Settings since (openReplacesSet) sticks.
+		openReplacesSet = readBool(k, "openReplacesSet", false);
+		openReplaces = openReplacesSet ? readBool(k, "openReplaces", openReplaces) : true;
 		newTemplate = readString(k, "newTemplate", newTemplate);
 		shortcuts = readString(k, "shortcuts", shortcuts);
 		checkUpdates = readBool(k, "checkUpdates", checkUpdates);
@@ -209,7 +219,12 @@ void Prefs::load() {
 		firstLaunchPlayed = readBool(k, "firstLaunchPlayed", firstLaunchPlayed);
 		introFirstLaunchPlayed = readBool(k, "introFirstLaunchPlayed", introFirstLaunchPlayed);
 		introUpdatePlayed = readString(k, "introUpdatePlayed", introUpdatePlayed);
-		introEveryLaunch = readBool(k, "introEveryLaunch", introEveryLaunch);
+		{
+			// "When CedarLogic opens"; before there was the choice, settled once from the old checkbox.
+			const int saved = intro::atLaunchFrom(readString(k, "introAtLaunch", ""));
+			const bool hadOld = g_key_file_has_key(k, kGroup, "introEveryLaunch", nullptr);
+			introAtLaunch = saved >= 0 ? saved : intro::settleAtLaunch(hadOld, hadOld && readBool(k, "introEveryLaunch", false));
+		}
 		seenWhatsNew = readString(k, "seenWhatsNew", seenWhatsNew);
 		exportGrid = readBool(k, "exportGrid", exportGrid);
 		exportInfo = readBool(k, "exportInfo", exportInfo);
@@ -283,6 +298,7 @@ void Prefs::save() const {
 	g_key_file_set_boolean(k, kGroup, "wireValueTag", wireValueTag);
 	g_key_file_set_boolean(k, kGroup, "confirmQuit", confirmQuit);
 	g_key_file_set_boolean(k, kGroup, "openReplaces", openReplaces);
+	g_key_file_set_boolean(k, kGroup, "openReplacesSet", openReplacesSet);
 	g_key_file_set_string(k, kGroup, "newTemplate", newTemplate.c_str());
 	g_key_file_set_string(k, kGroup, "shortcuts", shortcuts.c_str());
 	g_key_file_set_boolean(k, kGroup, "checkUpdates", checkUpdates);
@@ -323,7 +339,7 @@ void Prefs::save() const {
 	g_key_file_set_boolean(k, kGroup, "firstLaunchPlayed", firstLaunchPlayed);
 	g_key_file_set_boolean(k, kGroup, "introFirstLaunchPlayed", introFirstLaunchPlayed);
 	g_key_file_set_string(k, kGroup, "introUpdatePlayed", introUpdatePlayed.c_str());
-	g_key_file_set_boolean(k, kGroup, "introEveryLaunch", introEveryLaunch);
+	g_key_file_set_string(k, kGroup, "introAtLaunch", intro::atLaunchKey(introAtLaunch));
 	g_key_file_set_string(k, kGroup, "seenWhatsNew", seenWhatsNew.c_str());
 	g_key_file_set_boolean(k, kGroup, "exportGrid", exportGrid);
 	g_key_file_set_boolean(k, kGroup, "exportInfo", exportInfo);
@@ -339,10 +355,17 @@ void Prefs::save() const {
 	g_key_file_set_boolean(k, kGroup, "reportColor", reportColor);
 	g_key_file_set_boolean(k, kGroup, "timingWhole", timingWhole);
 	g_key_file_set_boolean(k, kGroup, "timingInColor", timingInColor);
-	g_key_file_set_integer(k, kGroup, "actionsMode", actionsMode);
+	g_key_file_set_boolean(k, kGroup, "actionsOn", actionsOn);
 	g_key_file_set_boolean(k, kGroup, "actionsCollapsed", actionsCollapsed);
 	g_key_file_set_boolean(k, kGroup, "actionsHoverOpen", actionsHoverOpen);
-	g_key_file_set_boolean(k, kGroup, "actionsHint", actionsHint);
+	// 0.4's steps are done (actionsStart): from here on the choice stays.
+	g_key_file_set_boolean(k, kGroup, "actionsOn04", TRUE);
+	g_key_file_set_boolean(k, kGroup, "actionsOpen04", TRUE);
+	g_key_file_set_boolean(k, kGroup, "showMeAroundSeen", showMeAroundSeen);
+	g_key_file_set_integer(k, kGroup, "crashReports", crashReports);
+	g_key_file_set_boolean(k, kGroup, "usageStats", usageStats);
+	g_key_file_set_boolean(k, kGroup, "privacyAsked", privacyAsked);
+	g_key_file_set_string(k, kGroup, "privacyChoice", privacyChoice.c_str());
 	{
 		std::vector<const gchar*> order, shown;
 		for (const std::string& a : actionsOrder) order.push_back(a.c_str());

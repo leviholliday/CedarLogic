@@ -1,6 +1,6 @@
 // Settings (Ctrl+,), laid out as the Mac app's (SettingsView.swift) and the
 // Linux app's: the pages as icons in a bar across the top -- General,
-// Appearance, Canvas, Toolbar, Actions, Shortcuts, Sync -- the window fitting each page as
+// Appearance, Canvas, Toolbar, Actions, Shortcuts, Sync, Privacy -- the window fitting each page as
 // you switch, and each setting a label on the left with its control and a
 // line of explanation under it. Every change applies at once; Escape or the
 // close box closes it, and Ctrl+Tab steps through the pages.
@@ -12,6 +12,9 @@
 #include "Alert.h"
 #include "Collections.h"
 #include "Integration.h"
+#include "Privacy.h"
+#include "UsageStats.h"
+#include "Intro.h"
 #include "Shortcuts.h"
 #include "SyncApp.h"
 #include "Toolbar.h"
@@ -28,7 +31,7 @@
 
 namespace {
 
-enum Page { General, Appearance, CanvasPage, ToolbarPage, ActionsPage, ShortcutsPage, SyncPage };
+enum Page { General, Appearance, CanvasPage, ToolbarPage, ActionsPage, ShortcutsPage, SyncPage, PrivacyPage };
 
 // Every window takes the change.
 void apply() {
@@ -266,7 +269,7 @@ void paintShortcuts(ShortcutList& L, ID2D1RenderTarget* rt, float w, float h) {
 	auto heading = [&](const std::string& title) {
 		std::string up = title;
 		for (char& c : up) c = (char)toupper((unsigned char)c);
-		drawText(rt, up, D2D1::RectF(14, y + 8, w - 14, y + 24), 10.5f, accent, TextAlign::Leading, true);
+		drawText(rt, up, D2D1::RectF(14, y + 8, w - 14, y + 24), 10.5f, chrome().accentText(look.field), TextAlign::Leading, true);
 		y += 28;
 	};
 	for (const shortcuts::Action& a : shortcuts::all()) {
@@ -284,7 +287,8 @@ void paintShortcuts(ShortcutList& L, ID2D1RenderTarget* rt, float w, float h) {
 		if (rec) {
 			const float tw = textWidth("Press keys…", 12, true);
 			capsLeft = right - tw;
-			drawText(rt, "Press keys…", D2D1::RectF(capsLeft, y + 5, right, y + rowH - 5), 12, accent, TextAlign::Trailing, true);
+			drawText(rt, "Press keys…", D2D1::RectF(capsLeft, y + 5, right, y + rowH - 5), 12,
+			         chrome().accentText(Chrome::over(withAlpha(accent, prefs().dark ? 0.24f : 0.14f), look.field)), TextAlign::Trailing, true);
 		} else if (!k.valid()) {
 			capsLeft = right - textWidth("None", 12);
 			drawText(rt, "None", D2D1::RectF(capsLeft, y + 5, right, y + rowH - 5), 12, look.dim, TextAlign::Trailing);
@@ -493,17 +497,6 @@ LRESULT CALLBACK shortcutListProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_P
 int g_page = 0;   // the page it opens on (--page, for CI), and the one last shown
 std::string g_actionsSearch;   // Settings > Actions' search as it opens (--actions-search, for CI's pictures)
 
-// Settings > Actions' line under "Actions:", for where they are now.
-std::string railHint() {
-	switch (prefs().actionsMode) {
-	case 0: return "A strip down the right edge of the window, the side panel's mirror. Rest on one for its name and shortcut; "
-	               "drag one up or down to move it. Click its edge to fold it away, or use View \u25B8 Hide Actions" +
-	               shortcuts::tipKeys(CMD_TOGGLE_ACTIONS) + ". Right-click it to choose your own.";
-	case 1: return "The same actions as buttons in the toolbar, with no strip on the right.";
-	default: return "No actions strip. Everything is still in the menus, with its shortcut.";
-	}
-}
-
 }  // namespace
 
 void setPreferencesPage(int page) { g_page = page; }
@@ -518,10 +511,10 @@ void showPreferencesDialog(HWND parent) {
 	f.okText = "";
 	f.cancelText = "";
 	f.settingsLayout = true;
-	f.pages = { "General", "Appearance", "Canvas", "Toolbar", "Actions", "Shortcuts", "Sync" };
-	// A gear, a palette, a mouse, ••• (as the Linux app has it), a pane on the right (the rail), a keyboard, two circling arrows.
-	f.pageIcons = { 0xE713, 0xE790, 0xE962, Icon::More, 0xE90D, 0xE765, 0xE895 };
-	f.page = std::max(0, std::min((int)SyncPage, g_page));
+	f.pages = { "General", "Appearance", "Canvas", "Toolbar", "Actions", "Shortcuts", "Sync", "Privacy" };
+	// A gear, a palette, a mouse, ••• (as the Linux app has it), a pane on the right (the rail), a keyboard, two circling arrows, a lock.
+	f.pageIcons = { 0xE713, 0xE790, 0xE962, Icon::More, 0xE90D, 0xE765, 0xE895, 0xE72E };
+	f.page = std::max(0, std::min((int)PrivacyPage, g_page));
 	// What each field does when it changes.
 	std::map<int, std::function<void(Form&, int)>> on;
 
@@ -620,15 +613,18 @@ void showPreferencesDialog(HWND parent) {
 			form.setTip(i, opensTip(after.first, after.second));
 		};
 	}
-	// The launch screen: the intro (Intro.cpp) at every launch, as the Mac's
-	// row (its words), silently.
-	FormField everyLaunch = check("Launch screen:", "Play the intro every time CedarLogic opens", p.introEveryLaunch,
-	                              "The circuit drawing itself, then the launch screen, as on the first launch, without its sound "
-	                              "(that's for the first launch and updates). Help > Play the Intro plays it any time.");
-	everyLaunch.tipLines = 3;
-	on[f.add(everyLaunch)] = [](Form& form, int i) {
-		prefs().introEveryLaunch = form.checked(i);
+	// The launch screen: "When CedarLogic opens" (Intro.h), as the Mac's row
+	// (its words): the short intro, the full one, the classic launch screen,
+	// or none; what each does under it.
+	std::vector<std::string> launchChoices;
+	for (int c = intro::AtShort; c <= intro::AtNone; c++) launchChoices.push_back(intro::atLaunchTitle(c));
+	const int launchAt = std::min<int>(intro::AtNone, std::max<int>(intro::AtShort, p.introAtLaunch));
+	FormField launch = choice("When CedarLogic opens:", launchChoices, launchAt, intro::atLaunchHint(launchAt));
+	launch.tipLines = 3;
+	on[f.add(launch)] = [](Form& form, int i) {
+		prefs().introAtLaunch = std::min<int>(intro::AtNone, std::max<int>(intro::AtShort, form.choice(i)));
 		prefs().save();
+		form.setTip(i, intro::atLaunchHint(prefs().introAtLaunch));
 	};
 	on[f.add(check("Quitting:", "Ask before quitting", p.confirmQuit,
 	               keyOf("quit", "Quitting") + " shows a question first: Enter quits, Escape doesn't."))] = [](Form& form, int i) {
@@ -784,16 +780,15 @@ void showPreferencesDialog(HWND parent) {
 	themeSwitch.wideGrid = true;
 	on[f.add(themeSwitch)] = [styles](Form& form, int i) { prefs().showThemeToggle = form.checked(i); apply(); form.refresh(styles); };
 
-	// ---- Actions (the rail, Rail.h; the Mac's CLActionsSettings)
+	// ---- Actions (the panel, Rail.h; the Mac's CLActionsSettings)
 	f.adding = ActionsPage;
 	ActionsList actionsList;
 	actionsList.query = g_actionsSearch;
-	FormField where = choice("Actions:", { "On screen", "In the toolbar", "Hidden" }, p.actionsMode, railHint());
-	where.tipLines = 3;
-	const int whereField = f.add(where);
-	FormField hoverOpen = check("", "Open it when the mouse reaches the right edge", p.actionsHoverOpen,
-	                            "When it's folded. Move the pointer to the window's right edge (or push it against the screen's) and it "
-	                            "slides out over the canvas, then back when you move away.");
+	// The panel on or off, and opening on hover under it (greyed when it's off).
+	FormField showPanel = check("Actions:", actions::kShowSwitch, p.actionsOn, p.actionsOn ? actions::showHint() : actions::offHint());
+	showPanel.tipLines = 2;
+	const int showField = f.add(showPanel);
+	FormField hoverOpen = check("", actions::kHoverSwitch, p.actionsHoverOpen, actions::hoverHint());
 	hoverOpen.tipLines = 2;
 	const int hoverField = f.add(hoverOpen);
 	FormField orderHeading;
@@ -802,12 +797,17 @@ void showPreferencesDialog(HWND parent) {
 	orderHeading.heading = true;
 	f.add(orderHeading);
 	actionsList.add(f, 300);
-	on[whereField] = [&actionsList, hoverField](Form& form, int i) {
-		prefs().actionsMode = std::max(0, std::min(2, form.choice(i)));
+	FormField foldNote;
+	foldNote.kind = FormField::Note;
+	foldNote.label = actions::foldHint();
+	foldNote.lines = 2;
+	f.add(foldNote);
+	on[showField] = [&actionsList, hoverField](Form& form, int i) {
+		prefs().actionsOn = form.checked(i);
 		actions::changed();
-		form.setTip(i, railHint());
-		form.enable(hoverField, prefs().actionsMode == 0);
-		actionsList.setDisabled(prefs().actionsMode == 2);
+		form.setTip(i, prefs().actionsOn ? actions::showHint() : actions::offHint());
+		form.enable(hoverField, prefs().actionsOn);
+		actionsList.setDisabled(!prefs().actionsOn);
 	};
 	on[hoverField] = [](Form& form, int i) {
 		prefs().actionsHoverOpen = form.checked(i);
@@ -848,6 +848,63 @@ void showPreferencesDialog(HWND parent) {
 	syncapp::SettingsPage sync;
 	sync.add(f);
 
+	// ---- Privacy (Privacy.h, the Mac's Settings > Privacy): crash reports and
+	// usage stats, what's sent, when the last report went, and deleting it.
+	// A lab's policy keys grey either switch out.
+	f.adding = PrivacyPage;
+	FormField crashField = check("Crash reports:", "Send crash reports", privacy::crashAllowed() == 1, privacy::crashHint());
+	crashField.tipLines = 3;
+	const int crashRow = f.add(crashField);
+	FormField usageField = check("Usage stats:", "Send anonymous usage stats", privacy::usageOn(), privacy::usageHint());
+	usageField.tipLines = 4;
+	const int usageRow = f.add(usageField);
+	FormField sentField = button("See What's Sent\u2026", false);
+	sentField.side = "What's sent:";
+	sentField.tip = "The next report exactly as it would go, and what's never sent.";
+	const int sentRow = f.add(sentField);
+	const int lastRow = f.add(picture("Last sent:", 20, [](ID2D1RenderTarget* rt, float w, float h) {
+		drawText(rt, privacy::lastSentLine(), D2D1::RectF(0, 2, w, h), 12.5f, formLook().dim);
+	}));
+	FormField deleteField = button("Delete What's Been Sent\u2026", false);
+	deleteField.side = "Your data:";
+	deleteField.tip = "Deletes every usage report sent from this PC. (Crash reports are deleted by Sentry after its retention period.)";
+	deleteField.tipLines = 2;
+	const int deleteRow = f.add(deleteField);
+	auto privacyEnable = [crashRow, usageRow, deleteRow](Form& form) {
+		form.enable(crashRow, privacy::crashOffered());
+		form.enable(usageRow, privacy::usageOffered());
+		form.enable(deleteRow, usage::Engine::isUsageId(usagestats::engine().id()));
+	};
+	on[crashRow] = [](Form& form, int i) {
+		privacy::record(privacy::Choice::Custom, form.checked(i), privacy::usageOn());
+		form.setTip(i, privacy::crashHint());
+	};
+	on[usageRow] = [lastRow, privacyEnable](Form& form, int i) {
+		privacy::record(privacy::Choice::Custom, privacy::crashAllowed() == 1, form.checked(i));
+		form.refresh(lastRow);
+		privacyEnable(form);
+	};
+	on[sentRow] = [](Form& form, int) { privacy::showWhatsSent(form.dialog); };
+	on[deleteRow] = [deleteRow, lastRow, privacyEnable](Form& form, int) {
+		if (!askYesNo(form.dialog, "Delete what's been sent?",
+		              "The server forgets every usage report sent from this PC. If usage stats stay on, they start again under a new random id."))
+			return;
+		form.enable(deleteRow, false);
+		form.setTip(deleteRow, "Deleting\u2026");
+		usagestats::deleteSent([deleteRow, lastRow, privacyEnable](bool done) {
+			Form* open = openPagedForm();
+			if (open == nullptr) return;
+			open->setTip(deleteRow, done ? std::string("Deleted.") + (privacy::usageOn() ? " Reports start again under a new id." : "")
+			                             : "Couldn't reach the server. It's asked again the next time CedarLogic opens.");
+			open->refresh(lastRow);
+			privacyEnable(*open);
+		});
+	};
+	// A report went (or the switch changed) while it's open: the line again.
+	usagestats::onChange([lastRow] {
+		if (Form* open = openPagedForm()) open->refresh(lastRow);
+	});
+
 	// A colour or a style picked, by a click or the arrows.
 	auto pickAccent = [&f, swatches](int i) {
 		if (i < 0 || i > 6) return;
@@ -876,8 +933,8 @@ void showPreferencesDialog(HWND parent) {
 	f.onInit = [&](Form& form) {
 		form.enable(gridStyle, prefs().showGrid);
 		actionsList.init(form);
-		form.enable(hoverField, prefs().actionsMode == 0);
-		actionsList.setDisabled(prefs().actionsMode == 2);
+		form.enable(hoverField, prefs().actionsOn);
+		actionsList.setDisabled(!prefs().actionsOn);
 		for (const auto& picker : { std::make_pair(swatches, &stepAccent), std::make_pair(styles, &stepStyle) }) {
 			HWND h = form.fields[picker.first].hwnd;
 			SetWindowSubclass(h, arrowPickProc, 2, (DWORD_PTR)picker.second);
@@ -892,6 +949,7 @@ void showPreferencesDialog(HWND parent) {
 		// Tab reaches the list (the arrows choose a shortcut, Enter changes it).
 		SetWindowLongPtrW(list.hwnd(), GWL_STYLE, GetWindowLongPtrW(list.hwnd(), GWL_STYLE) | WS_TABSTOP);
 		sync.init(form);
+		privacyEnable(form);
 	};
 	// Sync's state is read again every half minute ("Synced 5 min ago").
 	f.timerMs = 30000;
@@ -920,8 +978,9 @@ void showPreferencesDialog(HWND parent) {
 	// Escape on Settings > Actions clears its search first.
 	f.onCancel = [&](Form& form) { return !(form.page == ActionsPage && actionsList.clearSearch(form)); };
 	f.run(parent);
+	usagestats::onChange(nullptr);
 	sync.detach();
 	syncapp::nameChanged();
 	g_page = f.page;
-	if (g_page < 0 || g_page > SyncPage) g_page = General;
+	if (g_page < 0 || g_page > PrivacyPage) g_page = General;
 }

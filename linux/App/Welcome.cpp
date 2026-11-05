@@ -1,16 +1,22 @@
-// The welcome, the guided tour and What's New (see Welcome.h), as the Mac
-// app's Welcome.swift and WhatsNew.swift and the Windows app's: in the
+// The welcome, the lesson ("Learn Logic: Guided Tour") and What's New (see
+// Welcome.h), as the Mac app's Welcome.swift and WhatsNew.swift and the
+// Windows app's: in the
 // brand's look (Brand.h), with the wx and Mac page slide -- the new page
 // drifts in as it fades up, the old one away as it fades out.
 
 #include "Welcome.h"
 #include "Brand.h"
+#include "Privacy.h"
 #include "Canvas.h"
 #include "Settings.h"
+#include "Actions.h"
+#include "Shortcuts.h"
+#include "ShowMeAround.h"
 #include "Sync.h"
 #include "Window.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <functional>
 #include <vector>
@@ -42,6 +48,10 @@ struct Panel {
 	GtkWidget* win = nullptr;
 	GtkWidget* area = nullptr;
 	GtkWidget* overlay = nullptr;
+	// On a screen too small for it (the Raspberry Pi's 800x480, a Wayland
+	// desktop's panels): the window takes what the work area has, and its
+	// drawing scrolls in it at its own size.
+	GtkWidget* scroll = nullptr;
 	std::vector<Hit> hits;            // this frame's controls
 	int hot = -1, pressed = -1;
 	bool composited = false;
@@ -59,11 +69,14 @@ struct Panel {
 	void redraw() { if (area) gtk_widget_queue_draw(area); }
 
 	void create(GtkWindow* owner, int w, int h) {
+		// The room the screen has for it (Settings' fit, Style.cpp's usableArea).
+		const GdkRectangle room = usableArea(owner ? GTK_WIDGET(owner) : nullptr);
+		const bool fits = w <= room.width && h <= room.height;
 		win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 		gtk_window_set_title(GTK_WINDOW(win), "CedarLogic");
 		gtk_window_set_decorated(GTK_WINDOW(win), FALSE);
 		gtk_window_set_resizable(GTK_WINDOW(win), FALSE);
-		gtk_window_set_default_size(GTK_WINDOW(win), w, h);
+		gtk_window_set_default_size(GTK_WINDOW(win), std::min(w, room.width), std::min(h, room.height));
 		gtk_window_set_skip_taskbar_hint(GTK_WINDOW(win), TRUE);
 		if (owner) {
 			gtk_window_set_transient_for(GTK_WINDOW(win), owner);
@@ -74,7 +87,7 @@ struct Panel {
 		}
 		GdkScreen* screen = gtk_widget_get_screen(win);
 		GdkVisual* rgba = gdk_screen_get_rgba_visual(screen);
-		composited = rgba && gdk_screen_is_composited(screen);
+		composited = fits && rgba && gdk_screen_is_composited(screen);
 		if (composited) {
 			gtk_widget_set_visual(win, rgba);
 			gtk_widget_set_app_paintable(win, TRUE);
@@ -84,7 +97,17 @@ struct Panel {
 		gtk_widget_set_can_focus(area, TRUE);
 		gtk_widget_add_events(area, GDK_POINTER_MOTION_MASK | GDK_LEAVE_NOTIFY_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK);
 		gtk_container_add(GTK_CONTAINER(overlay), area);
-		gtk_container_add(GTK_CONTAINER(win), overlay);
+		if (fits) {
+			gtk_container_add(GTK_CONTAINER(win), overlay);
+		} else {
+			gtk_widget_set_size_request(area, w, h);
+			scroll = gtk_scrolled_window_new(nullptr, nullptr);
+			gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), w > room.width ? GTK_POLICY_AUTOMATIC : GTK_POLICY_NEVER,
+			                               h > room.height ? GTK_POLICY_AUTOMATIC : GTK_POLICY_NEVER);
+			gtk_widget_set_size_request(scroll, std::min(w, room.width), std::min(h, room.height));
+			gtk_container_add(GTK_CONTAINER(scroll), overlay);
+			gtk_container_add(GTK_CONTAINER(win), scroll);
+		}
 		g_signal_connect(area, "draw", G_CALLBACK(drawCb), this);
 		g_signal_connect(area, "motion-notify-event", G_CALLBACK(motionCb), this);
 		g_signal_connect(area, "leave-notify-event", G_CALLBACK(leaveCb), this);
@@ -109,7 +132,32 @@ struct Panel {
 		g_signal_handlers_disconnect_by_data(area, this);
 		g_signal_handlers_disconnect_by_data(win, this);
 		gtk_widget_destroy(win);
-		win = area = overlay = nullptr;
+		win = area = overlay = scroll = nullptr;
+	}
+	// A rectangle of the drawing scrolled into view (when it scrolls).
+	void reveal(const RectF& r) {
+		if (scroll == nullptr) return;
+		auto one = [](GtkAdjustment* a, float lo, float hi) {
+			const double page = gtk_adjustment_get_page_size(a), at = gtk_adjustment_get_value(a);
+			if (lo >= at && hi <= at + page) return;
+			const double to = hi - lo > page ? lo - 8 : (lo + hi) / 2 - page / 2;
+			gtk_adjustment_set_value(a, std::max(gtk_adjustment_get_lower(a), std::min(to, gtk_adjustment_get_upper(a) - page)));
+		};
+		one(gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scroll)), r.top, r.bottom);
+		one(gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(scroll)), r.left, r.right);
+	}
+	// A point of the drawing on the screen (as it's scrolled now).
+	bool toScreen(float x, float y, int& sx, int& sy) const {
+		GdkWindow* gw = area ? gtk_widget_get_window(area) : nullptr;
+		if (gw == nullptr) return false;
+		int ox = 0, oy = 0;
+		gdk_window_get_origin(gw, &ox, &oy);
+		GtkAllocation a;
+		gtk_widget_get_allocation(area, &a);
+		if (!gtk_widget_get_has_window(area)) { ox += a.x; oy += a.y; }
+		sx = ox + (int)std::lround(x);
+		sy = oy + (int)std::lround(y);
+		return true;
 	}
 
 	static gboolean drawCb(GtkWidget* w, cairo_t* cr, gpointer self) {
@@ -253,10 +301,11 @@ void glyph(cairo_t* cr, const char* icon, float x, float y, float size, Color c 
 }
 
 // A card with an icon, a title and a line (the Mac's BrandCard rows).
-float pointCard(cairo_t* cr, float x, float y, float w, const char* icon, const std::string& title, const std::string& line, float minH = 0) {
+float pointCard(cairo_t* cr, float x, float y, float w, const char* icon, const std::string& title, const std::string& line, float minH = 0,
+                float extra = 0) {
 	const float textW = w - 66 - 18;
 	const float lh = text(nullptr, line, 0, 0, 12.5f, Normal, kSecondary, textW + 18);
-	const float h = std::max(minH, 16 + 20 + 4 + lh + 16);
+	const float h = std::max(minH, 16 + 20 + 4 + lh + 16 + extra);
 	card(cr, rectF(x, y, x + w, y + h));
 	glyph(cr, icon, x + 14, y + 13, 15);
 	text(cr, title, x + 48, y + 14, 14, Bold, kPrimary, textW + 18);
@@ -268,6 +317,352 @@ void runAction(CircuitWindow* w, const char* action) {
 	if (windowAlive(w)) w->runAction(action);
 }
 
+RectF inflate(const RectF& r, float d) { return rectF(r.left - d, r.top - d, r.right + d, r.bottom + d); }
+
+// ---- The Actions panel's switches and picture ----------------------------------------
+// The welcome's page and What's New's "Show or Hide It" card (the Mac's
+// ActionsPanelChoice): "Show the Actions panel" and "Open on hover" beside a
+// small picture of a window with the panel in it. They change the real
+// setting as they're flipped.
+
+// A neon switch: a capsule with a knob, lit when on.
+void brandSwitch(cairo_t* cr, float x, float y, bool on, bool hot) {
+	const RectF r = rectF(x, y, x + 40, y + 23);
+	if (on) glow(cr, r, 11.5f, alpha(kNeon, 0.45f), 7);
+	fillRound(cr, r, 11.5f, on ? kNeon : colorF(1, 1, 1, hot ? 0.2f : 0.14f));
+	strokeRound(cr, rectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), 11, colorF(1, 1, 1, on ? 0.35f : 0.16f));
+	fillCircle(cr, pointF(on ? r.right - 11.5f : r.left + 11.5f, y + 11.5f), 8.5f, on ? kInk : colorF(1, 1, 1, 0.85f));
+}
+
+// A small window, dark: the toolbar, the side panel, a gate and a light on
+// the canvas, and (when on) the panel down the right edge, its first button
+// named as the pointer rests on it. With `hover`, a pointer waits at the edge.
+void panelPicture(cairo_t* cr, float x, float y, bool on, bool hover) {
+	const float W = 300, H = 200;
+	const Chrome ch{ true };
+	const RectF win = rectF(x, y, x + W, y + H);
+	fillRound(cr, rectF(win.left - 4, win.top + 4, win.right + 4, win.bottom + 12), 14, colorF(0, 0, 0, 0.25f));
+	if (on) glow(cr, win, 10, alpha(kNeon, 0.12f), 16);
+	cairo_save(cr);
+	roundedPath(cr, win, 10);
+	cairo_clip(cr);
+	fillRect(cr, win, ch.canvas());
+	// The toolbar.
+	fillRect(cr, rectF(x, y, x + W, y + 22), ch.bar());
+	for (int i = 0; i < 4; i++) fillRound(cr, rectF(x + 10 + i * 17, y + 7, x + 22 + i * 17, y + 15), 2, withAlpha(ch.barInk(), 0.35f));
+	for (int i = 0; i < 3; i++) fillCircle(cr, pointF(x + W - 12 - i * 13, y + 11), 3.5f, withAlpha(ch.barInk(), 0.3f));
+	cairo_move_to(cr, x + W - 54, y + 7);
+	cairo_line_to(cr, x + W - 47, y + 11);
+	cairo_line_to(cr, x + W - 54, y + 15);
+	cairo_close_path(cr);
+	setColor(cr, alpha(kNeon, 0.8f));
+	cairo_fill(cr);
+	// The side panel.
+	const float top = y + 22;
+	fillRect(cr, rectF(x, top, x + 54, y + H), ch.tabBar());
+	fillRect(cr, rectF(x + 54, top, x + 55, y + H), ch.sash());
+	for (int r = 0; r < 5; r++)
+		for (int c = 0; c < 2; c++)
+			strokeRound(cr, rectF(x + 7 + c * 23 + 0.5f, top + 8 + r * 21 + 0.5f, x + 25 + c * 23 - 0.5f, top + 24 + r * 21 - 0.5f), 3,
+			            withAlpha(ch.barInk(), 0.3f));
+	// The canvas: dots, two switches into a gate, and a light.
+	const float cl = x + 55, cr2 = x + W - (on ? 30 : 0);
+	setColor(cr, colorF(1, 1, 1, 0.12f));
+	for (float dx = cl + 8; dx < cr2; dx += 12)
+		for (float dy = top + 8; dy < y + H; dy += 12) cairo_rectangle(cr, dx, dy, 1, 1);
+	cairo_fill(cr);
+	const float cy = top + (H - 22) / 2, gx = (cl + cr2) / 2 - 26;
+	for (float wy : { cy - 10, cy + 10 }) {
+		drawLine(cr, pointF(cl + 18, wy), pointF(gx, wy), kNeon, 1.6f);
+		strokeRound(cr, rectF(cl + 6, wy - 6, cl + 18, wy + 6), 3, kNeon, 1.3f);
+	}
+	drawLine(cr, pointF(gx + 40, cy), pointF(gx + 70, cy), kNeon, 1.6f);
+	cairo_move_to(cr, gx, cy - 18);
+	cairo_line_to(cr, gx + 18, cy - 18);
+	cairo_curve_to(cr, gx + 42, cy - 18, gx + 42, cy + 18, gx + 18, cy + 18);
+	cairo_line_to(cr, gx, cy + 18);
+	cairo_close_path(cr);
+	setColor(cr, alpha(kNeon, 0.12f));
+	cairo_fill_preserve(cr);
+	setColor(cr, kNeon);
+	cairo_set_line_width(cr, 1.6);
+	cairo_stroke(cr);
+	const Color lamp = colorF(1, 0.77f, 0.25f);
+	fillCircle(cr, pointF(gx + 78, cy), 13, alpha(lamp, 0.18f));
+	fillCircle(cr, pointF(gx + 78, cy), 8, lamp);
+	if (on) {
+		// The panel, its first button named.
+		const float rl = x + W - 30;
+		fillRect(cr, rectF(rl, top, x + W, y + H), ch.canvas());
+		fillRect(cr, rectF(rl, top, rl + 1, y + H), hover ? alpha(kNeon, 0.5f) : ch.sash());
+		const std::vector<std::string>& ids = actions::defaults();
+		for (size_t i = 0; i < ids.size(); i++) {
+			const RectF b = rectF(rl + 4, top + 6 + i * 25, rl + 26, top + 27 + i * 25);
+			if (i == 0) {
+				fillRound(cr, b, 4, alpha(kNeon, 0.14f));
+				strokeRound(cr, b, 4, alpha(kNeon, 0.9f), 1);
+			}
+			if (const actions::Item* a = actions::find(ids[i])) actions::drawIcon(cr, *a, b, 10, withAlpha(ch.barInk(), 0.9f));
+		}
+		const float tw = textWidth("Check My Circuit", 8.5f, Medium);
+		const RectF tip = rectF(rl - 8 - tw - 10, top + 9, rl - 8, top + 24);
+		fillRound(cr, tip, 4, ch.tabCard());
+		strokeRound(cr, tip, 4, colorF(1, 1, 1, 0.12f));
+		text(cr, "Check My Circuit", tip.left + 5, tip.top + 2, 8.5f, Medium, ch.tabInk());
+		if (hover) {
+			// A pointer resting at the edge.
+			const float px = rl - 12, py = top + 120;
+			cairo_move_to(cr, px, py);
+			cairo_line_to(cr, px, py + 15);
+			cairo_line_to(cr, px + 4, py + 11);
+			cairo_line_to(cr, px + 7, py + 17);
+			cairo_line_to(cr, px + 9.5f, py + 16);
+			cairo_line_to(cr, px + 6.5f, py + 10);
+			cairo_line_to(cr, px + 11, py + 10);
+			cairo_close_path(cr);
+			setColor(cr, colorF(1, 1, 1));
+			cairo_fill_preserve(cr);
+			setColor(cr, colorF(0, 0, 0, 0.8f));
+			cairo_set_line_width(cr, 1);
+			cairo_stroke(cr);
+		}
+	}
+	cairo_restore(cr);
+	strokeRound(cr, rectF(win.left + 0.5f, win.top + 0.5f, win.right - 0.5f, win.bottom - 0.5f), 10, colorF(1, 1, 1, 0.16f));
+	text(cr, on ? (hover ? "On, and it opens on hover when folded." : "On. Folded, a click on its edge opens it.") : "Off. Everything is still in the menus.",
+	     x, y + H + 10, 10.5f, SemiBold, on ? kNeon : kFaint, W, TextAlign::Center, 0.4f);
+}
+
+std::string toggleActionsKey() {
+	const shortcuts::Action* a = shortcuts::find("toggleActions");
+	const std::string k = a ? shortcuts::label(shortcuts::keys(*a)) : std::string();
+	return k.empty() ? std::string() : " (" + k + ")";
+}
+
+// The two switch rows and the picture, at (x, y); a click on a row's
+// `showId` / `hoverId` hit flips it (choiceClick). Returns the bottom.
+float panelChoice(cairo_t* cr, Panel& panel, float x, float y, int showId, int hoverId) {
+	const float colW = 290;
+	const bool on = prefs().actionsOn, hover = prefs().actionsHoverOpen;
+	float ry = y;
+	struct Row { const char* title; const char* line; bool value; int id; bool enabled; };
+	const Row rows[] = {
+		{ actions::kShowSwitch, "The commands you use most, a click each, down the window\u2019s right edge.", on, showId, true },
+		{ actions::kHoverSwitch, "Folded away, it slides out when the pointer reaches the right edge, and goes back when you move off.", hover, hoverId, on },
+	};
+	for (const Row& r : rows) {
+		const float lw = colW - 40 - 14;
+		const float lh = text(nullptr, r.line, 0, 0, 11.5f, Normal, kSecondary, lw);
+		const float h = std::max(23.0f, 18 + 4 + lh);
+		if (!r.enabled) cairo_push_group(cr);
+		text(cr, r.title, x, ry, 13.5f, Bold, kPrimary, lw);
+		text(cr, r.line, x, ry + 22, 11.5f, Normal, kSecondary, lw);
+		brandSwitch(cr, x + colW - 40, ry + 1, r.value, panel.hot == r.id);
+		if (!r.enabled) {
+			cairo_pop_group_to_source(cr);
+			cairo_paint_with_alpha(cr, 0.45);
+		} else {
+			panel.addHit(rectF(x - 6, ry - 6, x + colW + 6, ry + h + 6), r.id);
+		}
+		ry += h + 16;
+	}
+	const std::string note = std::string("Change it any time: Settings \u25B8 Actions, or View \u25B8 ") + (on ? "Hide" : "Show") + " Actions" +
+	                         toggleActionsKey() + ".";
+	ry += text(cr, note, x, ry, 11.5f, Normal, kFaint, colW);
+	panelPicture(cr, x + colW + 30, y, on, hover);
+	return std::max(ry, y + 200 + 30);
+}
+
+// A click on one of panelChoice's switches.
+bool choiceClick(int id, int showId, int hoverId) {
+	if (id == showId) prefs().actionsOn = !prefs().actionsOn;
+	else if (id == hoverId && prefs().actionsOn) prefs().actionsHoverOpen = !prefs().actionsHoverOpen;
+	else return false;
+	guarded("the Actions panel", [] { actions::changed(); });
+	return true;
+}
+
+}  // namespace
+
+// ---- "A small favour": the privacy question (Privacy.h) ----------------------------
+// The welcome's page and the updaters' sheet draw it the same way: the
+// eyebrow and title, a card with a lit LED (glowing once, as it arrives)
+// and the note signed "-- Levi", the two equal buttons, "Choose what to
+// send" (two switches and Continue with these instead of the buttons), "See
+// exactly what's sent" and the line about Settings > Privacy.
+
+namespace {
+
+enum { kAskYes = 700, kAskNo, kAskChoose, kAskSent, kAskCrash, kAskUsage, kAskContinue, kAskEnd };
+
+struct Ask {
+	bool choosing = false;
+	bool crash = false, usage = false;
+	double shownAt = -1;   // the glow's clock (from the first frame)
+	privacy::Choice answered = privacy::Choice::None;
+	RectF rects[kAskEnd - kAskYes] = {};
+	bool drawn[kAskEnd - kAskYes] = {};
+	void reset() {
+		choosing = false;
+		crash = privacy::crashAllowed() == 1;
+		usage = privacy::usageOn();
+		shownAt = -1;
+		answered = privacy::Choice::None;
+		for (bool& d : drawn) d = false;
+	}
+};
+
+// The card's glow: up as it arrives, held a moment, then gone (once).
+float askGlow(double t) {
+	if (t < 0.25) return 0;
+	if (t < 0.75) return (float)easeOut((t - 0.25) / 0.5);
+	if (t < 1.6) return 1;
+	if (t < 2.5) return (float)(1 - easeOut((t - 1.6) / 0.9));
+	return 0;
+}
+bool askAnimating(const Ask& a) { return a.shownAt < 0 || nowSeconds() - a.shownAt < 2.7; }
+
+void askHit(Panel& panel, Ask& a, const RectF& r, int id) {
+	panel.addHit(r, id);
+	a.rects[id - kAskYes] = r;
+	a.drawn[id - kAskYes] = true;
+}
+
+// One of the two equal buttons: glass with a neon edge, the label in the
+// ground's text colour (a tick on the one chosen).
+void choiceButton(cairo_t* cr, const RectF& r, const std::string& label, bool chosen, bool hot) {
+	const float rad = (r.bottom - r.top) / 2;
+	fillRound(cr, r, rad, colorF(1, 1, 1, hot ? 0.15f : 0.08f));
+	strokeRound(cr, rectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), rad, alpha(kNeon, hot ? 0.75f : 0.45f));
+	const std::string shown = chosen ? "✓  " + label : label;
+	const float th = text(nullptr, shown, 0, 0, 13.5f, SemiBold, kPrimary);
+	text(cr, shown, r.left, (r.top + r.bottom - th) / 2, 13.5f, SemiBold, kPrimary, r.right - r.left, TextAlign::Center);
+}
+
+// A switch row: its title and line on the left, the switch at the right.
+float askSwitchRow(cairo_t* cr, Panel& panel, float x, float y, float w, const char* title, const std::string& line, bool on, bool ok, int id) {
+	const float lw = w - 40 - 14;
+	const float lh = text(nullptr, line, 0, 0, 11.5f, Normal, kSecondary, lw);
+	const float h = std::max(23.0f, 18 + 4 + lh);
+	if (cr == nullptr) return h;
+	if (!ok) cairo_push_group(cr);
+	text(cr, title, x, y, 13.5f, Bold, kPrimary, lw);
+	text(cr, line, x, y + 22, 11.5f, Normal, kSecondary, lw);
+	brandSwitch(cr, x + w - 40, y + 1, on, ok && panel.hot == id);
+	if (!ok) {
+		cairo_pop_group_to_source(cr);
+		cairo_paint_with_alpha(cr, 0.5);
+	}
+	return h;
+}
+
+// The question at (x, y), `w` wide; returns its height. With no `cr`, only measures.
+float paintAsk(cairo_t* cr, Panel& panel, Ask& a, float x, float y, float w, bool compact) {
+	if (cr && a.shownAt < 0) a.shownAt = nowSeconds();
+	const double t = a.shownAt < 0 ? 0 : nowSeconds() - a.shownAt;
+	const float gap = compact ? 14.0f : 18.0f;
+	float at = y;
+	std::string eyebrow = privacy::kEyebrow;
+	for (char& c : eyebrow) c = (char)toupper((unsigned char)c);
+	at += text(cr, eyebrow, x, at, 11, Bold, kNeon, 0, TextAlign::Leading, 1.6f) + 8;
+	at += text(cr, privacy::kTitle, x, at, compact ? 26 : 28, Bold, kPrimary, w) + gap;
+
+	const float noteSize = compact ? 13.5f : 14.5f;
+	const float textX = x + 18 + 34 + 16, textW = x + w - 18 - textX;
+	const std::string quote = std::string("“") + privacy::kNote + "”";
+	const float nh = text(nullptr, quote, 0, 0, noteSize, Normal, kPrimary, textW);
+	const std::string signature = std::string("— ") + privacy::kSignature;
+	const float sh = text(nullptr, signature, 0, 0, 12, Normal, kSecondary);
+	const float cardH = 18 + nh + 10 + sh + 18;
+	const RectF cardR = rectF(x, at, x + w, at + cardH);
+	if (cr) {
+		const float g = askGlow(t);
+		if (g > 0.01f) glow(cr, cardR, 14, alpha(kNeon, 0.3f * g), 14);
+		fillRound(cr, cardR, 14, alpha(kNeon, 0.05f + 0.05f * g));
+		strokeRound(cr, rectF(cardR.left + 0.5f, cardR.top + 0.5f, cardR.right - 0.5f, cardR.bottom - 0.5f), 14, alpha(kNeon, 0.22f + 0.48f * g));
+		fillRound(cr, rectF(x, at + 14, x + 3, at + cardH - 14), 1.5f, alpha(kNeon, 0.8f));
+		// The LED, lit (a warm amber, as the canvas's lights).
+		const Color lamp = colorF(1, 196 / 255.0f, 64 / 255.0f), rim = colorF(230 / 255.0f, 160 / 255.0f, 20 / 255.0f);
+		const PointF lc = pointF(x + 18 + 17, at + 20 + 17);
+		fillCircle(cr, lc, 17, alpha(lamp, 0.18f));
+		glow(cr, rectF(lc.x - 9, lc.y - 9, lc.x + 9, lc.y + 9), 9, alpha(lamp, 0.8f), 8);
+		fillCircle(cr, lc, 9, lamp);
+		strokeCircle(cr, lc, 8, rim, 2);
+		text(cr, quote, textX, at + 18, noteSize, Normal, kPrimary, textW);
+		text(cr, signature, textX, at + 18 + nh + 10, 12, Normal, kSecondary);
+	}
+	at += cardH + gap;
+
+	if (!a.choosing) {
+		const float bw = (w - 14) / 2;
+		const RectF yes = rectF(x, at, x + bw, at + 40), no = rectF(x + bw + 14, at, x + w, at + 40);
+		if (cr) {
+			choiceButton(cr, yes, privacy::kYes, a.answered == privacy::Choice::Yes, panel.hot == kAskYes);
+			choiceButton(cr, no, privacy::kNo, a.answered == privacy::Choice::No, panel.hot == kAskNo);
+		}
+		askHit(panel, a, yes, kAskYes);
+		askHit(panel, a, no, kAskNo);
+		at += 40;
+	} else {
+		const bool crashOk = privacy::crashOffered(), usageOk = privacy::usageOffered();
+		const std::string crashLine = crashOk ? "Where it went wrong, if CedarLogic crashes."
+		                            : privacy::crashPolicyOff() ? "Turned off on this computer by its administrator."
+		                                                        : "Not in this build.";
+		const std::string usageLine = usageOk ? "How often it's open and for how long, and which features are used."
+		                                      : "Turned off on this computer by its administrator.";
+		const float rowW = std::min(w, 520.0f);
+		// Crash reports' switch takes a click unless a policy says no (kept for a build that has them).
+		const bool crashSwitch = !privacy::crashPolicyOff();
+		struct Row { const char* title; const std::string* line; bool on, ok; int id; };
+		const Row rows[] = { { "Send crash reports", &crashLine, a.crash && crashSwitch, crashSwitch, kAskCrash },
+		                     { "Send anonymous usage stats", &usageLine, a.usage && usageOk, usageOk, kAskUsage } };
+		for (const Row& r : rows) {
+			const float h = askSwitchRow(cr, panel, x, at, rowW, r.title, *r.line, r.on, r.ok, r.id);
+			if (r.ok) askHit(panel, a, rectF(x - 4, at - 4, x + rowW + 4, at + h + 4), r.id);
+			at += h + 10;
+		}
+		const RectF go = rectF(x, at + 2, x + 260, at + 42);
+		if (cr) choiceButton(cr, go, "Continue with these", a.answered == privacy::Choice::Custom, panel.hot == kAskContinue);
+		askHit(panel, a, go, kAskContinue);
+		at += 42;
+	}
+	at += gap;
+
+	const std::string choose = a.choosing ? "Just yes or no" : "Choose what to send";
+	const std::string sent = "See exactly what's sent";
+	const float cw = 20 + textWidth(choose, 12.5f, SemiBold), sw = 20 + textWidth(sent, 12.5f, SemiBold);
+	const RectF chooseR = rectF(x, at - 3, x + cw + 4, at + 19), sentR = rectF(chooseR.right + 18, at - 3, chooseR.right + 22 + sw, at + 19);
+	if (cr) {
+		const Color lit = colorF(0.55f, 1, 0.7f);
+		glyph(cr, a.choosing ? "go-previous-symbolic" : "emblem-system-symbolic", chooseR.left, at + 1, 13, panel.hot == kAskChoose ? lit : kNeon);
+		text(cr, choose, chooseR.left + 20, at, 12.5f, SemiBold, panel.hot == kAskChoose ? lit : kNeon);
+		glyph(cr, "edit-find-symbolic", sentR.left, at + 1, 13, panel.hot == kAskSent ? lit : kNeon);
+		text(cr, sent, sentR.left + 20, at, 12.5f, SemiBold, panel.hot == kAskSent ? lit : kNeon);
+	}
+	askHit(panel, a, chooseR, kAskChoose);
+	askHit(panel, a, sentR, kAskSent);
+	at += 18 + 10;
+	at += text(cr, privacy::kLater, x, at, 11.5f, Normal, kFaint, w);
+	return at - y;
+}
+
+// A click on one of its controls: true when it was one.
+bool askClick(Ask& a, int id, GtkWindow* owner, const std::function<void(privacy::Choice, bool, bool)>& done) {
+	switch (id) {
+	case kAskYes: done(privacy::Choice::Yes, true, true); return true;
+	case kAskNo: done(privacy::Choice::No, privacy::crashAllowed() == 1, false); return true;
+	case kAskChoose:
+		a.choosing = !a.choosing;
+		for (bool& d : a.drawn) d = false;
+		return true;
+	case kAskSent: privacy::showWhatsSent(owner); return true;
+	case kAskCrash: if (!privacy::crashPolicyOff()) a.crash = !a.crash; return true;
+	case kAskUsage: if (privacy::usageOffered()) a.usage = !a.usage; return true;
+	case kAskContinue: done(privacy::Choice::Custom, a.crash, a.usage); return true;
+	default: return false;
+	}
+}
+
 }  // namespace
 
 // ---- The welcome ------------------------------------------------------------------
@@ -276,8 +671,11 @@ namespace welcome {
 
 namespace {
 
-enum { kSkip = 1, kBack, kNext, kJustStart, kTheme0 = 10, kSwatch0 = 20, kGrid0 = 40, kReady0 = 50 };
-const int kPages = 5;
+enum { kSkip = 1, kBack, kNext, kJustStart, kShowSwitch, kHoverSwitch, kTheme0 = 10, kSwatch0 = 20, kGrid0 = 40, kReady0 = 50 };
+// The pages: what it is, making it yours, the Actions panel, your name, six
+// keys, "A small favour" (the privacy question, Privacy.h), and what next.
+enum { kPageIntro, kPageSetup, kPageActions, kPageName, kPageKeys, kPagePrivacy, kPageReady };
+const int kPages = 7;
 const float kWW = 780, kWH = 580;
 const int kAccentOrder[] = { 6, 0, 1, 2, 3, 4, 5 };
 const char* kAccentNames[] = { "Blue", "Purple", "Pink", "Orange", "Green", "Graphite", "CedarLogic" };
@@ -301,10 +699,15 @@ struct Welcome {
 	double pressedAt[6] = { -10, -10, -10, -10, -10, -10 };
 	GtkWidget* name = nullptr;
 	RectF nameBox{};
+	Ask ask;          // "A small favour"
+	guint askNext = 0;   // answered: on to the next page in a moment
 };
 Welcome* g_welcome = nullptr;
 
-void finish(const char* then = nullptr) {
+// Closed, by any of its buttons or keys: Show Me Around follows (until it's
+// been seen), then the lesson if that was the choice; a template's picker
+// and the shortcut list open first, and the walk waits for them.
+void finish(showme::WelcomeExit exit, const char* then = nullptr) {
 	Welcome* w = g_welcome;
 	if (w == nullptr) return;
 	g_welcome = nullptr;
@@ -312,19 +715,26 @@ void finish(const char* then = nullptr) {
 	prefs().seenWhatsNew = whatsnew::kVersion;   // new to it all: nothing to catch up on
 	prefs().save();
 	CircuitWindow* window = windowAlive(w->window) ? w->window : nullptr;
+	if (w->askNext) g_source_remove(w->askNext);
 	w->panel.destroy();
 	delete w;
+	// Skipped before "A small favour": asked as a sheet, before Show Me Around.
+	privacy::askWhenReady();
 	if (window == nullptr) return;
 	gtk_window_present(window->window());
-	if (then && std::string(then) == "tour") startTourOn(window);
-	else if (then) runAction(window, then);
+	if (then) runAction(window, then);
+	if (!showme::welcomeClosed(exit) && exit == showme::WelcomeExit::GuidedTour) startTourOn(window);
 }
 
 void go(int d) {
 	Welcome* w = g_welcome;
 	if (w == nullptr) return;
-	const int to = std::max(0, std::min(kPages - 1, w->pager.page + d));
+	int to = std::max(0, std::min(kPages - 1, w->pager.page + d));
+	// Nothing to ask (a lab's policy turned both off): "A small favour" is passed by.
+	if (to == kPagePrivacy && !privacy::anythingToAsk()) to += d > 0 ? 1 : -1;
 	if (to == w->pager.page) return;
+	// "A small favour" is answered before going on (its own two buttons).
+	if (d > 0 && w->pager.page == kPagePrivacy && w->ask.answered == privacy::Choice::None) return;
 	w->pager.go(to);
 	gtk_widget_hide(w->name);
 	gtk_widget_grab_focus(w->panel.area);
@@ -333,10 +743,10 @@ void go(int d) {
 
 void readyAction(int i) {
 	switch (i) {
-	case 0: finish("tour"); break;
-	case 1: finish("win.new-template"); break;
-	case 2: finish(); break;
-	default: finish("win.shortcuts"); break;
+	case 0: finish(showme::WelcomeExit::GuidedTour); break;
+	case 1: finish(showme::WelcomeExit::Template, "win.new-template"); break;
+	case 2: finish(showme::WelcomeExit::Blank); break;
+	default: finish(showme::WelcomeExit::Shortcuts, "win.shortcuts"); break;
 	}
 }
 
@@ -417,6 +827,13 @@ void pageSetup(cairo_t* cr, Panel& panel) {
 	text(cr, blurbs[grid], 56, y + 24 + 34 + 14, 11.5f, Normal, kSecondary);
 }
 
+void pageActions(cairo_t* cr, Panel& panel) {
+	const float y = heading(cr, 56, 34, kWW - 112, "One click away", "The Actions panel",
+	                        "The buttons you use most, down the right edge of every window: Check My Circuit, Tidy Up, Share Link and more. "
+	                        "Show Me Around points it out in a moment.");
+	panelChoice(cr, panel, 56, y + 22, kShowSwitch, kHoverSwitch);
+}
+
 void pageName(cairo_t* cr, Welcome* w) {
 	const float left = 56, colW = 420;
 	float y = heading(cr, left, 34, colW, "One more thing", "Who's handing this in?",
@@ -466,13 +883,32 @@ void pageKeys(cairo_t* cr, Welcome* w) {
 	}
 }
 
+void pagePrivacy(cairo_t* cr, Welcome* w) { paintAsk(cr, w->panel, w->ask, 56, 28, kWW - 112, false); }
+
+// Answered on the welcome: marked, then on to the last page a moment later.
+void answerPrivacy(privacy::Choice c, bool crash, bool usage) {
+	Welcome* w = g_welcome;
+	if (w == nullptr) return;
+	privacy::answer(c, crash, usage);
+	w->ask.answered = c;
+	w->panel.redraw();
+	if (w->askNext == 0)
+		w->askNext = g_timeout_add(250, [](gpointer) -> gboolean {
+			if (g_welcome) {
+				g_welcome->askNext = 0;
+				go(1);
+			}
+			return G_SOURCE_REMOVE;
+		}, nullptr);
+}
+
 void pageReady(cairo_t* cr, Welcome* w, double t) {
 	heading(cr, 56, 30, kWW - 112, "Ready", "Build your first circuit", "↑↓ and Enter work here too; ← goes back.");
 	struct Tile { const char* title; const char* line; const char* icon; };
 	const Tile tiles[] = {
-		{ "Take the guided tour", "Two switches, a gate and a light, in about five minutes. Recommended.", nullptr },
+		{ "Learn logic: the Guided Tour", "Build two switches, a gate and a light, in about five minutes. Recommended.", nullptr },
 		{ "Start from a template", "A lab page with your name, a counter, a 7-segment starter, or your own.", "document-new-symbolic" },
-		{ "Start with a blank canvas", "Jump straight in. Help ▸ Guided Tour replays the tour.", "list-add-symbolic" },
+		{ "Start with a blank canvas", "Jump straight in. A quick look around the window comes first.", "list-add-symbolic" },
 		{ "See every shortcut", "The whole list, searchable.", "input-keyboard-symbolic" },
 	};
 	float y = 126;
@@ -498,23 +934,31 @@ void paint(cairo_t* cr, float w, float h) {
 	const double t = nowSeconds() - wl->opened;
 	ground(cr, w, h);
 	const float footer = h - 74;
+	for (bool& d : wl->ask.drawn) d = false;
 	wl->pager.draw(cr, wl->panel, rectF(0, 0, w, footer - 1), [&](int pg) {
 		switch (pg) {
-		case 0: pageIntro(cr, t); break;
-		case 1: pageSetup(cr, wl->panel); break;
-		case 2: pageName(cr, wl); break;
-		case 3: pageKeys(cr, wl); break;
+		case kPageIntro: pageIntro(cr, t); break;
+		case kPageSetup: pageSetup(cr, wl->panel); break;
+		case kPageActions: pageActions(cr, wl->panel); break;
+		case kPageName: pageName(cr, wl); break;
+		case kPageKeys: pageKeys(cr, wl); break;
+		case kPagePrivacy: pagePrivacy(cr, wl); break;
 		default: pageReady(cr, wl, t); break;
 		}
 	});
 	const int page = wl->pager.page;
+	// Its controls count only once the page has landed.
+	if (page != kPagePrivacy || wl->pager.sliding())
+		for (bool& d : wl->ask.drawn) d = false;
 	// The name's box, once its page has landed.
-	if (page == 2 && !wl->pager.sliding() && wl->name && !gtk_widget_get_visible(wl->name)) {
+	if (page == kPageName && !wl->pager.sliding() && wl->name && !gtk_widget_get_visible(wl->name)) {
 		gtk_widget_set_margin_start(wl->name, (int)wl->nameBox.left + 8);
 		gtk_widget_set_margin_top(wl->name, (int)wl->nameBox.top + 3);
 		gtk_widget_show(wl->name);
 	}
-	if (page < kPages - 1) {
+	// (No Skip on "A small favour": its own two buttons go on.)
+	const bool mustAnswer = page == kPagePrivacy && wl->ask.answered == privacy::Choice::None;
+	if (page < kPages - 1 && page != kPagePrivacy) {
 		const RectF skip = rectF(w - 26 - 44, 18, w - 26, 40);
 		text(cr, "Skip", skip.left, skip.top, 12.5f, Medium, wl->panel.hot == kSkip ? alpha(kPrimary, 0.7f) : kFaint, skip.right - skip.left,
 		     TextAlign::Trailing);
@@ -524,9 +968,14 @@ void paint(cairo_t* cr, float w, float h) {
 	dots(cr, 44, footer + 37, kPages, page);
 	const float x = w - 44;
 	const RectF next = page < kPages - 1 ? rectF(x - 142, footer + 19, x, footer + 55) : rectF(x - 110, footer + 19, x, footer + 55);
-	button(cr, next, page == 0 ? "Get Started" : page < kPages - 1 ? "Continue" : "Just Start", page < kPages - 1,
-	       wl->panel.hot == (page < kPages - 1 ? kNext : kJustStart));
-	wl->panel.addHit(next, page < kPages - 1 ? kNext : kJustStart);
+	if (mustAnswer) {
+		// No Continue here: the page's own two buttons go on.
+		text(cr, "Choose one to go on", next.left - 20, footer + 29, 12, Normal, kFaint, next.right - next.left + 20, TextAlign::Trailing);
+	} else {
+		button(cr, next, page == 0 ? "Get Started" : page < kPages - 1 ? "Continue" : "Just Start", page < kPages - 1,
+		       wl->panel.hot == (page < kPages - 1 ? kNext : kJustStart));
+		wl->panel.addHit(next, page < kPages - 1 ? kNext : kJustStart);
+	}
 	if (page > 0) {
 		const RectF back = rectF(next.left - 8 - 96, footer + 19, next.left - 8, footer + 55);
 		button(cr, back, "Back", false, wl->panel.hot == kBack);
@@ -537,7 +986,14 @@ void paint(cairo_t* cr, float w, float h) {
 void click(int id) {
 	Welcome* w = g_welcome;
 	if (w == nullptr) return;
-	if (id == kSkip || id == kJustStart) finish();
+	if (w->pager.page == kPagePrivacy && !w->pager.sliding() && id >= kAskYes && id < kAskEnd) {
+		askClick(w->ask, id, GTK_WINDOW(w->panel.win), answerPrivacy);
+		if (g_welcome) g_welcome->panel.redraw();
+		return;
+	}
+	if (id == kSkip) finish(showme::WelcomeExit::Skip);
+	else if (id == kJustStart) finish(showme::WelcomeExit::Blank);
+	else if (choiceClick(id, kShowSwitch, kHoverSwitch)) {}
 	else if (id == kNext) go(1);
 	else if (id == kBack) go(-1);
 	else if (id >= kTheme0 && id < kTheme0 + 3) setTheme(id - kTheme0);
@@ -557,8 +1013,13 @@ bool key(guint k, guint state) {
 	Welcome* w = g_welcome;
 	if (w == nullptr) return false;
 	const bool last = w->pager.page == kPages - 1;
+	// Escape on "A small favour", unanswered: No thanks.
+	if (k == GDK_KEY_Escape && w->pager.page == kPagePrivacy && w->ask.answered == privacy::Choice::None) {
+		answerPrivacy(privacy::Choice::No, privacy::crashAllowed() == 1, false);
+		return true;
+	}
 	switch (k) {
-	case GDK_KEY_Escape: finish(); return true;
+	case GDK_KEY_Escape: finish(showme::WelcomeExit::Skip); return true;
 	case GDK_KEY_Return:
 	case GDK_KEY_KP_Enter: if (last) readyAction(w->readyChoice); else go(1); return true;
 	case GDK_KEY_Left: go(-1); return true;
@@ -568,7 +1029,7 @@ bool key(guint k, guint state) {
 	case GDK_KEY_question: readyAction(3); return true;
 	default: break;
 	}
-	if (w->pager.page == 3 && !(state & (GDK_SHIFT_MASK | GDK_CONTROL_MASK))) {
+	if (w->pager.page == kPageKeys && !(state & (GDK_SHIFT_MASK | GDK_CONTROL_MASK))) {
 		const guint lower = gdk_keyval_to_lower(k);
 		for (int i = 0; i < 6; i++)
 			if (lower == kKeys[i].keyval) { w->pressedAt[i] = nowSeconds(); w->panel.redraw(); return true; }
@@ -583,6 +1044,9 @@ bool offer(CircuitWindow* window) {
 	g_welcome = new Welcome();
 	Welcome* w = g_welcome;
 	w->window = window;
+	w->ask.reset();
+	// Asked already (a check, or settings from another copy): shown as answered, and it goes on.
+	if (privacy::asked()) w->ask.answered = privacy::choice() == privacy::Choice::None ? privacy::Choice::Custom : privacy::choice();
 	Panel& p = w->panel;
 	p.paint = paint;
 	p.click = click;
@@ -593,7 +1057,7 @@ bool offer(CircuitWindow* window) {
 		const int pg = wl->pager.page;
 		bool lit = false;
 		for (double at : wl->pressedAt) lit = lit || nowSeconds() - at < 0.8;
-		return wl->pager.sliding() || pg == 0 || pg == 4 || lit;
+		return wl->pager.sliding() || pg == kPageIntro || pg == kPageReady || lit || (pg == kPagePrivacy && askAnimating(wl->ask));
 	};
 	p.create(window->window(), (int)kWW, (int)kWH);
 	// The name box: a bare entry on the drawn field.
@@ -625,7 +1089,13 @@ bool pageForScreenshot(int page) {
 
 GtkWidget* window() { return g_welcome ? g_welcome->panel.win : nullptr; }
 
-// ---- The guided tour --------------------------------------------------------------
+void closeForCheck(int choice) {
+	if (g_welcome == nullptr) return;
+	if (choice < 0) finish(showme::WelcomeExit::Skip);
+	else readyAction(std::min(3, choice));
+}
+
+// ---- Learn Logic: Guided Tour --------------------------------------------------------------
 // It builds an AND circuit with you on a circuit of its own (a new one, so
 // it never touches your work). Its card sits in the corner of that circuit's
 // window, over the canvas; each step moves on by itself once it's done.
@@ -717,8 +1187,8 @@ std::vector<Step>& steps() {
 			  return !g_tour->window->filePath().empty() && n != "Untitled" && n != "Untitled Circuit";
 		  } },
 		{ "You built a working circuit",
-		  [] { return std::string("That's the loop: add, wire, try it, check it. Press Ctrl+? whenever you want every shortcut, and Help ▸ Guided Tour "
-		                          "brings this back. Something odd, or an idea? The speech bubble in the toolbar sends it in."); },
+		  [] { return std::string("That's the loop: add, wire, try it, check it. Press Ctrl+? whenever you want every shortcut, and Help ▸ Learn "
+		                          "Logic: Guided Tour brings this back. Something odd, or an idea? The speech bubble in the toolbar sends it in."); },
 		  keys({ "Ctrl", "?" }), nullptr },
 	};
 	return s;
@@ -798,7 +1268,7 @@ void paintTour(cairo_t* cr, float w, float h) {
 	strokeRound(cr, rectF(0.5f, 0.5f, w - 0.5f, h - 0.5f), 12, alpha(kNeon, 0.18f));
 	float y = 18;
 	icon(cr, 18, y, 18);
-	text(cr, format("GUIDED TOUR  ·  %d OF %d", t->step + 1, count), 44, y + 1, 10.5f, Bold, kNeon, 0, TextAlign::Leading, 1.2f);
+	text(cr, format("LEARN LOGIC  ·  %d OF %d", t->step + 1, count), 44, y + 1, 10.5f, Bold, kNeon, 0, TextAlign::Leading, 1.2f);
 	const RectF close = rectF(w - 18 - 22, y - 2, w - 18, y + 20);
 	fillCircle(cr, pointF((close.left + close.right) / 2, (close.top + close.bottom) / 2), 11, colorF(1, 1, 1, t->hot == Tour::kClose ? 0.16f : 0.08f));
 	drawIcon(cr, Icon::Dismiss, close, 9, kSecondary);
@@ -932,6 +1402,9 @@ void startTourOn(CircuitWindow* from) {
 	welcome::startTour(target);
 }
 
+bool tourActive() { return g_tour != nullptr; }
+void endTourNow() { endTour(); }
+
 }  // namespace welcome
 
 // ---- What's New ------------------------------------------------------------------
@@ -942,7 +1415,7 @@ const char* const kVersion = "0.4";
 
 namespace {
 
-enum { kSkip = 1, kBack, kNext, kTry, kLine0 = 10, kTile0 = 20 };
+enum { kSkip = 1, kBack, kNext, kTry, kPanelLink, kCardDim, kCardBody, kCardDone, kShowSwitch, kHoverSwitch, kLine0 = 10, kTile0 = 20 };
 const float kNW = 820, kNH = 600;
 
 struct Point { const char* icon; const char* title; const char* line; };
@@ -970,9 +1443,9 @@ const Chapter kChapters[] = {
 	    { "insert-link-symbolic", "Share Link", "File \xE2\x96\xB8 Share Link copies a link. Anyone can open it in CedarLogic Online, in any browser. CedarLogic opens cedarlogic:// links too." } },
 	  "Check My Circuit", "win.check-circuit" },
 	{ "Actions", "One click away", "A strip of buttons down the window's right edge, the side panel's mirror.",
-	  { { Icon::Rail, "Actions on the right", "The things you use most, one click away. Drag them into your order; right-click to choose your own." },
+	  { { Icon::Rail, "The Actions panel", "The buttons you use most, down the right edge of the window, one click each. Drag them into your order; right-click to choose your own." },
 	    { "view-conceal-symbolic", "Folds out of the way", "Click its edge to fold it to a thin tab. Move the pointer to the window's right edge and it slides out. F9 shows or hides it." },
-	    { "preferences-system-symbolic", "Yours to choose", "Settings \xE2\x96\xB8 Actions: anything from any menu, in your order. On screen, in the toolbar, or hidden." } },
+	    { "preferences-system-symbolic", "Yours to choose", "Settings \xE2\x96\xB8 Actions: anything from any menu, in your order. One switch there turns the panel off." } },
 	  "Show the Actions", "win.show-actions" },
 	{ "Tidy Up", "Rebuilt for cleaner layouts", "Tidy Up by Signal Flow lays a page out again, and it's quick.",
 	  { { "view-sort-ascending-symbolic", "Cleaner results", "Groups you drew stay together, labels keep their order, and straight wires stay straight." },
@@ -993,6 +1466,7 @@ struct WhatsNew {
 	Pager pager;
 	CircuitWindow* window = nullptr;
 	double opened = nowSeconds();
+	bool panelCard = false;   // the Actions panel's switches, over the page
 };
 WhatsNew* g_new = nullptr;
 
@@ -1005,9 +1479,21 @@ void close(const char* action) {
 	delete w;
 	if (window == nullptr) return;
 	gtk_window_present(window->window());
-	if (action && std::string(action) == "tour") welcome::startTourOn(window);
-	else if (action && std::string(action) == "sync") settings::show(window, settings::kSyncPage);
+	const std::string a = action ? action : "";
+	if (a == "showme") {
+		// The finale's Show Me Around, once What's New has gone.
+		g_timeout_add(300, [](gpointer data) -> gboolean {
+			CircuitWindow* cw = static_cast<CircuitWindow*>(data);
+			if (windowAlive(cw)) guarded("Show Me Around", [&] { showme::start(cw); });
+			return G_SOURCE_REMOVE;
+		}, window);
+		return;
+	}
+	if (a == "tour") welcome::startTourOn(window);
+	else if (a == "sync") settings::show(window, settings::kSyncPage);
 	else if (action) runAction(window, action);
+	// Show Me Around follows, the first time (ShowMeAround.h).
+	showme::startWhenReady();
 }
 
 void go(int d) {
@@ -1179,7 +1665,18 @@ void pageChapter(cairo_t* cr, WhatsNew* wn, int i, double t) {
 	const Chapter& c = kChapters[i];
 	const float x = 48, cw = 420;
 	float y = heading(cr, x, 34, cw, c.eyebrow, c.title, c.line) + 18;
-	for (const Point& p : c.points) y += pointCard(cr, x, y, cw, p.icon, p.title, p.line) + 10;
+	for (const Point& p : c.points) {
+		// The panel's card: on or off, open on hover.
+		const bool panel = p.icon == Icon::Rail;
+		const float h = pointCard(cr, x, y, cw, p.icon, p.title, p.line, 0, panel ? 22 : 0);
+		if (panel) {
+			const char* link = "Show or Hide It\u2026";
+			const RectF r = rectF(x + 48, y + h - 34, x + 48 + textWidth(link, 11.5f, SemiBold), y + h - 16);
+			text(cr, link, r.left, r.top, 11.5f, SemiBold, wn->panel.hot == kPanelLink ? kPrimary : kNeon);
+			wn->panel.addHit(inflate(r, 4), kPanelLink);
+		}
+		y += h + 10;
+	}
 	if (c.tryTitle) {
 		const float bw = textWidth(c.tryTitle, 13, SemiBold) + 40;
 		const RectF r = rectF(x, y + 6, x + bw, y + 42);
@@ -1193,11 +1690,12 @@ void pageFinale(cairo_t* cr, WhatsNew* wn) {
 	float y = heading(cr, 56, 34, kNW - 112, "That's the tour", "Go build something", "It's under Help ▸ What's New in CedarLogic whenever you want it back.") + 22;
 	struct Tile { const char* title; const char* line; const char* icon; };
 	const Tile tiles[] = {
-		{ "Take the guided tour", "Two switches, a gate and a light, on a circuit of its own.", "find-location-symbolic" },
+		{ "Show me around", "A minute\u2019s walk round the window: where everything is.", "find-location-symbolic" },
+		{ "Learn logic: the Guided Tour", "Two switches, a gate and a light, on a circuit of its own.", "applications-science-symbolic" },
 		{ "Start from a template", "The Lab Page has your name on it already.", "document-new-symbolic" },
 		{ "Open CedarLogic Help", "Every feature, with its keys.", "help-browser-symbolic" },
 	};
-	for (int i = 0; i < 3; i++) {
+	for (int i = 0; i < 4; i++) {
 		const RectF r = rectF(56, y, kNW - 56, y + 66);
 		card(cr, r, wn->panel.hot == kTile0 + i, 13);
 		glyph(cr, tiles[i].icon, r.left + 20, r.top + 21, 15);
@@ -1238,11 +1736,34 @@ void paint(cairo_t* cr, float w, float h) {
 		button(cr, back, "Back", false, wn->panel.hot == kBack);
 		wn->panel.addHit(back, kBack);
 	}
+	if (wn->panelCard) {
+		// The Actions panel's switches, over the page: the setting itself.
+		// Nothing under it takes a click meanwhile.
+		wn->panel.hits.clear();
+		fillRect(cr, rectF(0, 0, w, h), colorF(0, 0, 0, 0.55f));
+		wn->panel.addHit(rectF(0, 0, w, h), kCardDim);
+		const RectF card = rectF(36, 70, w - 36, h - 70);
+		glow(cr, card, 18, colorF(0, 0, 0, 0.5f), 24);
+		cairo_save(cr);
+		roundedPath(cr, card, 18);
+		cairo_clip(cr);
+		cairo_translate(cr, card.left, card.top);
+		ground(cr, rectWidth(card), rectHeight(card), 0.2f, 0, 24);
+		cairo_restore(cr);
+		strokeRound(cr, rectF(card.left + 0.5f, card.top + 0.5f, card.right - 0.5f, card.bottom - 0.5f), 17.5f, colorF(1, 1, 1, 0.14f));
+		wn->panel.addHit(card, kCardBody);
+		const float y = heading(cr, card.left + 28, card.top + 28, rectWidth(card) - 56, "The Actions panel", "Yours to show or hide",
+		                        std::string("It\u2019s on for everyone in ") + kVersion + ". Flip these to suit you; they change it straight away.");
+		panelChoice(cr, wn->panel, card.left + 28, y + 18, kShowSwitch, kHoverSwitch);
+		const RectF done = rectF(card.right - 28 - 110, card.bottom - 28 - 36, card.right - 28, card.bottom - 28);
+		button(cr, done, "Done", true, wn->panel.hot == kCardDone);
+		wn->panel.addHit(done, kCardDone);
+	}
 }
 
 }  // namespace
 
-void show(CircuitWindow* window, int page) {
+void show(CircuitWindow* window, int page, bool panelCard) {
 	if (window == nullptr) return;
 	if (g_new) { gtk_window_present(GTK_WINDOW(g_new->panel.win)); return; }
 	prefs().seenWhatsNew = kVersion;
@@ -1250,23 +1771,40 @@ void show(CircuitWindow* window, int page) {
 	g_new = new WhatsNew();
 	g_new->window = window;
 	g_new->pager.page = std::max(0, std::min(kPages - 1, page));
+	g_new->panelCard = panelCard;
 	Panel& p = g_new->panel;
 	p.paint = paint;
 	p.animating = [] { return g_new && (g_new->pager.sliding() || g_new->pager.page == 0); };
 	p.click = [](int id) {
 		WhatsNew* wn = g_new;
 		if (wn == nullptr) return;
-		if (id == kSkip) close(nullptr);
+		if (wn->panelCard) {
+			if (id == kCardDim || id == kCardDone) wn->panelCard = false;
+			else choiceClick(id, kShowSwitch, kHoverSwitch);
+			wn->panel.redraw();
+			return;
+		}
+		if (id == kPanelLink) wn->panelCard = true;
+		else if (id == kSkip) close(nullptr);
 		else if (id == kBack) go(-1);
 		else if (id == kNext) go(1);
 		else if (id == kTry && wn->pager.page >= 1 && wn->pager.page <= kChapterCount) close(kChapters[wn->pager.page - 1].tryAction);
 		else if (id >= kLine0 && id < kLine0 + kChapterCount) go(id - kLine0 + 1 - wn->pager.page);
-		else if (id == kTile0) close("tour");
-		else if (id == kTile0 + 1) close("win.new-template");
-		else if (id == kTile0 + 2) close("win.help");
+		else if (id == kTile0) close("showme");
+		else if (id == kTile0 + 1) {
+			// Show Me Around first, if it hasn't been seen.
+			if (prefs().showMeAroundSeen) close("tour");
+			else { showme::setThen([](CircuitWindow* cw) { welcome::startTourOn(cw); }); close(nullptr); }
+		}
+		else if (id == kTile0 + 2) close("win.new-template");
+		else if (id == kTile0 + 3) close("win.help");
 		if (g_new) g_new->panel.redraw();
 	};
 	p.key = [](guint k, guint) {
+		if (g_new && g_new->panelCard) {
+			if (k == GDK_KEY_Escape || k == GDK_KEY_Return || k == GDK_KEY_KP_Enter) { g_new->panelCard = false; g_new->panel.redraw(); return true; }
+			return k == GDK_KEY_Left || k == GDK_KEY_Right;
+		}
 		if (k == GDK_KEY_Escape) close(nullptr);
 		else if (k == GDK_KEY_Return || k == GDK_KEY_KP_Enter || k == GDK_KEY_Right) go(1);
 		else if (k == GDK_KEY_Left) go(-1);
@@ -1286,3 +1824,167 @@ bool offer(CircuitWindow* window) {
 GtkWidget* window() { return g_new ? g_new->panel.win : nullptr; }
 
 }  // namespace whatsnew
+
+// ---- "A small favour", for updaters ------------------------------------------------
+// The welcome's question as a sheet over the circuit window (Privacy.h), in
+// the brand's look: 640 points wide and as tall as the taller of its two
+// ways, measured before it goes up, so nothing in it resizes the window (on
+// a screen with less room, the window takes what there is and it scrolls).
+
+namespace privacy {
+
+namespace {
+
+struct Sheet {
+	Panel panel;
+	Ask ask;
+	CircuitWindow* window = nullptr;
+};
+Sheet* g_sheet = nullptr;
+const float kSheetW = 640, kSheetPadX = 36, kSheetPadY = 30;
+
+// Someone who'd said yes to crash reports before is told so above it.
+bool crashAlreadyOn() { return crashAllowed() == 1 && crashOffered(); }
+
+float sheetHeight() {
+	Panel measure;
+	Ask a;
+	a.reset();
+	float h = 0;
+	for (bool switches : { false, true }) {
+		a.choosing = switches;
+		h = std::max(h, paintAsk(nullptr, measure, a, kSheetPadX, 0, kSheetW - 2 * kSheetPadX, true));
+	}
+	return std::ceil(kSheetPadY + (crashAlreadyOn() ? 24 : 0) + h + kSheetPadY);
+}
+
+void sheetAnswered(Choice c, bool crash, bool usage) {
+	answer(c, crash, usage);
+	closeSheet();
+	// Show Me Around follows, the first time.
+	showme::startWhenReady();
+}
+
+}  // namespace
+
+bool sheetOpen() { return g_sheet != nullptr; }
+
+void presentSheet(CircuitWindow* over) {
+	if (over == nullptr || g_sheet || !windowAlive(over)) return;
+	stopWatching();
+	g_sheet = new Sheet();
+	g_sheet->window = over;
+	g_sheet->ask.reset();
+	Panel& p = g_sheet->panel;
+	p.paint = [](cairo_t* cr, float w, float h) {
+		Sheet* s = g_sheet;
+		if (s == nullptr) return;
+		ground(cr, w, h, 0.5f, 0.0f);
+		float y = kSheetPadY;
+		if (crashAlreadyOn()) {
+			text(cr, "Crash reports are on, as you chose before. This adds usage stats, if you'd like.", kSheetPadX, y, 11.5f, Normal, kSecondary,
+			     w - 2 * kSheetPadX);
+			y += 24;
+		}
+		for (bool& d : s->ask.drawn) d = false;
+		paintAsk(cr, s->panel, s->ask, kSheetPadX, y, kSheetW - 2 * kSheetPadX, true);
+	};
+	p.click = [](int id) {
+		Sheet* s = g_sheet;
+		if (s == nullptr) return;
+		askClick(s->ask, id, GTK_WINDOW(s->panel.win), sheetAnswered);
+		if (g_sheet) g_sheet->panel.redraw();
+	};
+	// Escape (and closing it) is No thanks.
+	p.key = [](guint k, guint) {
+		if (k != GDK_KEY_Escape || g_sheet == nullptr) return false;
+		sheetAnswered(Choice::No, crashAllowed() == 1, false);
+		return true;
+	};
+	p.animating = [] { return g_sheet && askAnimating(g_sheet->ask); };
+	p.create(over->window(), (int)kSheetW, (int)sheetHeight());
+	gtk_widget_set_name(p.win, "privacy-sheet");
+	gtk_window_set_title(GTK_WINDOW(p.win), "A small favour");
+	// Its circuit window going takes it with it (unanswered: asked again next time).
+	gtk_window_set_destroy_with_parent(GTK_WINDOW(p.win), TRUE);
+	g_signal_connect(p.win, "destroy", CL_CALLBACK(+[](GtkWidget* w, gpointer) {
+		if (g_sheet && g_sheet->panel.win == w) {
+			Sheet* s = g_sheet;
+			g_sheet = nullptr;
+			s->panel.win = s->panel.area = s->panel.overlay = s->panel.scroll = nullptr;
+			delete s;
+		}
+	}), nullptr);
+	p.show();
+}
+
+void closeSheet() {
+	Sheet* s = g_sheet;
+	if (s == nullptr) return;
+	g_sheet = nullptr;
+	CircuitWindow* w = windowAlive(s->window) ? s->window : nullptr;
+	s->panel.destroy();
+	delete s;
+	if (w) gtk_window_present(w->window());
+}
+
+namespace {
+// The question showing now: the sheet, or the welcome on its page (landed).
+bool showing(Ask*& a, Panel*& p) {
+	if (g_sheet && g_sheet->panel.win) {
+		a = &g_sheet->ask;
+		p = &g_sheet->panel;
+		return true;
+	}
+	welcome::Welcome* w = welcome::g_welcome;
+	if (w && w->panel.win && w->pager.page == welcome::kPagePrivacy && !w->pager.sliding()) {
+		a = &w->ask;
+		p = &w->panel;
+		return true;
+	}
+	return false;
+}
+}  // namespace
+
+GtkWidget* askWindow() {
+	Ask* a = nullptr;
+	Panel* p = nullptr;
+	return showing(a, p) ? p->win : nullptr;
+}
+
+bool controlPoint(Control c, int& sx, int& sy) {
+	Ask* a = nullptr;
+	Panel* p = nullptr;
+	if (!showing(a, p)) return false;
+	const int i = (int)c;
+	if (i < 0 || i >= kAskEnd - kAskYes || !a->drawn[i]) return false;
+	const RectF& r = a->rects[i];
+	p->reveal(r);
+	// (Scrolled: the new place is drawn before the pointer goes there.)
+	while (gtk_events_pending()) gtk_main_iteration();
+	return p->toScreen((r.left + r.right) / 2, (r.top + r.bottom) / 2, sx, sy);
+}
+
+bool choosing() {
+	Ask* a = nullptr;
+	Panel* p = nullptr;
+	return showing(a, p) && a->choosing;
+}
+
+bool switchState(bool crash) {
+	Ask* a = nullptr;
+	Panel* p = nullptr;
+	if (!showing(a, p)) return false;
+	return crash ? a->crash : a->usage;
+}
+
+void setChoosing(bool on) {
+	Ask* a = nullptr;
+	Panel* p = nullptr;
+	if (!showing(a, p)) return;
+	a->choosing = on;
+	for (bool& d : a->drawn) d = false;
+	p->redraw();
+}
+
+}  // namespace privacy

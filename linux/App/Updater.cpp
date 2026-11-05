@@ -34,13 +34,16 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <signal.h>
 #include <functional>
 #include <glib/gstdio.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <string>
 #include <thread>
+#include <vector>
 
 #ifndef CL_GIT_COMMIT
 #define CL_GIT_COMMIT "unknown"
@@ -109,50 +112,92 @@ bool installedFromDeb() {
 }
 
 // curl, or wget where curl is missing (a stock Ubuntu desktop has only
-// wget). The URL is ours and quoted; one with a quote in it is refused, and
-// so is anything but https. Neither reads the user's ~/.curlrc or ~/.wgetrc,
-// and curl won't follow a redirect off https either. (wget has no switch for
-// that; what it brings is still checked against the signed manifest.)
+// wget), each run straight from an argument list: no shell ever reads the
+// URL or the file name, so nothing in them can be taken as a command.
+// Only https is fetched (and the --channel-check stand-in's plain http).
+// Neither reads the user's ~/.curlrc or ~/.wgetrc, and curl won't follow a
+// redirect off https either. (wget has no switch for that; what it brings
+// is still checked against the signed manifest.)
 bool testServerUrl(const std::string& url) {
 	return !g_testServer.empty() && url.compare(0, g_testServer.size() + 1, g_testServer + "/") == 0;
 }
-bool fetchable(const std::string& url) {
-	return (url.compare(0, 8, "https://") == 0 || testServerUrl(url)) && url.find('\'') == std::string::npos;
+bool fetchable(const std::string& url) { return url.compare(0, 8, "https://") == 0 || testServerUrl(url); }
+
+std::vector<std::string> curlArgs(const std::string& url) {
+	if (testServerUrl(url)) return { "curl", "-q", "-fsSL", "--proto", "=http", "--proto-redir", "=http" };   // the stand-in only
+	return { "curl", "-q", "-fsSL", "--proto", "=https", "--proto-redir", "=https" };
 }
-const char* const kCurl = "curl -q -fsSL --proto =https --proto-redir =https";
-const char* const kCurlTest = "curl -q -fsSL --proto =http --proto-redir =http";   // the stand-in only
-const char* const kWget = "wget --no-config -q";
-std::string curlFor(const std::string& url) { return testServerUrl(url) ? kCurlTest : kCurl; }
+std::vector<std::string> wgetArgs() { return { "wget", "--no-config", "-q" }; }
+
+// Runs `args` (found on PATH, no shell), its errors thrown away. With `out`,
+// what it writes is read into it, at most `limit` bytes: past that it's
+// stopped and `over` set. True when it ran and exited 0.
+bool runProgram(const std::vector<std::string>& args, std::string* out = nullptr, size_t limit = 0, bool* over = nullptr) {
+	std::vector<gchar*> argv;
+	for (const std::string& a : args) argv.push_back(const_cast<gchar*>(a.c_str()));
+	argv.push_back(nullptr);
+	if (over) *over = false;
+	GPid pid = 0;
+	gint fd = -1;
+	GError* e = nullptr;
+	const GSpawnFlags flags = (GSpawnFlags)(G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD | G_SPAWN_STDERR_TO_DEV_NULL |
+	                                        (out ? 0 : G_SPAWN_STDOUT_TO_DEV_NULL));
+	if (!g_spawn_async_with_pipes(nullptr, argv.data(), nullptr, flags, nullptr, nullptr, &pid, nullptr, out ? &fd : nullptr, nullptr, &e)) {
+		if (e) g_error_free(e);
+		return false;   // not installed
+	}
+	bool tooMuch = false;
+	if (out) {
+		out->clear();
+		char chunk[8192];
+		while (true) {
+			const ssize_t got = read(fd, chunk, sizeof chunk);
+			if (got < 0 && errno == EINTR) continue;
+			if (got <= 0) break;
+			out->append(chunk, (size_t)got);
+			if (out->size() > limit) {
+				tooMuch = true;
+				kill(pid, SIGTERM);
+				break;
+			}
+		}
+		close(fd);
+	}
+	int status = 0;
+	while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+	g_spawn_close_pid(pid);
+	if (over) *over = tooMuch;
+	return !tooMuch && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
 
 // The body, at most `limit` bytes (more: none at all, as a failure).
 std::string fetch(const std::string& url, size_t limit = 1u << 20) {
 	if (!fetchable(url)) return {};
-	const std::string cmds[] = {
-		curlFor(url) + " --max-time 15 -H 'User-Agent: CedarLogic' '" + url + "' 2>/dev/null",
-		std::string(kWget) + " -T 15 -U CedarLogic -O - '" + url + "' 2>/dev/null",
-	};
-	for (const std::string& cmd : cmds) {
-		FILE* p = popen(cmd.c_str(), "r");
-		if (!p) continue;
+	std::vector<std::string> curl = curlArgs(url);
+	for (const char* a : { "--max-time", "15", "--max-filesize" }) curl.push_back(a);
+	curl.push_back(format("%zu", limit));
+	for (const std::string& a : { std::string("-H"), std::string("User-Agent: CedarLogic"), std::string("--"), url }) curl.push_back(a);
+	std::vector<std::string> wget = wgetArgs();
+	for (const std::string& a : { std::string("-T"), std::string("15"), std::string("-U"), std::string("CedarLogic"), std::string("-O"),
+	                              std::string("-"), std::string("--"), url })
+		wget.push_back(a);
+	for (const std::vector<std::string>* args : { &curl, &wget }) {
 		std::string body;
-		char chunk[8192];
-		size_t got;
-		while (body.size() <= limit && (got = fread(chunk, 1, sizeof chunk, p)) > 0) body.append(chunk, got);
-		const bool whole = body.size() <= limit;
-		if (pclose(p) == 0 && whole && !body.empty()) return body;
-		if (!whole) return {};
+		bool over = false;
+		if (runProgram(*args, &body, limit, &over) && !body.empty()) return body;
+		if (over) return {};
 	}
 	return {};
 }
 
 bool download(const std::string& url, const std::string& dest) {
-	if (!fetchable(url) || dest.find('\'') != std::string::npos) return false;
-	const std::string cmds[] = {
-		curlFor(url) + " --max-time 300 -o '" + dest + "' '" + url + "' 2>/dev/null",
-		std::string(kWget) + " -T 120 -O '" + dest + "' '" + url + "' 2>/dev/null",
-	};
-	for (const std::string& cmd : cmds) {
-		if (std::system(cmd.c_str()) == 0) return true;
+	if (!fetchable(url) || dest.empty()) return false;
+	std::vector<std::string> curl = curlArgs(url);
+	for (const std::string& a : { std::string("--max-time"), std::string("300"), std::string("-o"), dest, std::string("--"), url }) curl.push_back(a);
+	std::vector<std::string> wget = wgetArgs();
+	for (const std::string& a : { std::string("-T"), std::string("120"), std::string("-O"), dest, std::string("--"), url }) wget.push_back(a);
+	for (const std::vector<std::string>* args : { &curl, &wget }) {
+		if (runProgram(*args)) return true;
 		std::remove(dest.c_str());
 	}
 	return false;
@@ -1524,9 +1569,17 @@ void Updater_IntegrateAppImage() {
 	const std::string file = apps + "/cedarlogic.desktop";
 	// Tell the desktop (quietly; whichever of these it has).
 	auto refresh = [&] {
-		const std::string cmd = "(update-desktop-database '" + apps + "'; update-mime-database '" + data + "/mime'; "
-		                        "gtk-update-icon-cache -q -t '" + data + "/icons/hicolor') >/dev/null 2>&1 &";
-		if (data.find('\'') == std::string::npos) (void)std::system(cmd.c_str());
+		const std::string mimeDir = data + "/mime", iconDir = data + "/icons/hicolor";
+		const std::vector<std::vector<std::string>> commands = {
+			{ "update-desktop-database", apps }, { "update-mime-database", mimeDir }, { "gtk-update-icon-cache", "-q", "-t", iconDir } };
+		for (const auto& c : commands) {
+			std::vector<gchar*> argv;
+			for (const std::string& a : c) argv.push_back(const_cast<gchar*>(a.c_str()));
+			argv.push_back(nullptr);
+			// In the background, each from its argument list (no shell); a missing one is skipped.
+			g_spawn_async(nullptr, argv.data(), nullptr, (GSpawnFlags)(G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL),
+			              nullptr, nullptr, nullptr, nullptr);
+		}
 	};
 	if (g_file_test("/usr/share/applications/cedarlogic.desktop", G_FILE_TEST_EXISTS)) {
 		// The installed app's entry is hidden by one of the same name here

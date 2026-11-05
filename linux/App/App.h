@@ -56,6 +56,9 @@ struct Prefs {
 	bool wireValueTag = false;    // resting on a wire shows what it carries
 	bool confirmQuit = true;      // Ctrl+Q asks first
 	bool openReplaces = true;     // opening a circuit replaces the one in the window (the Mac's default)
+	// Chosen in Settings (so a saved openReplaces is someone's choice): earlier
+	// builds saved "false" whether or not anyone chose it.
+	bool openReplacesSet = false;
 	std::string newTemplate;      // what Ctrl+N starts from: a template's id, or "" for a blank page
 	std::string shortcuts;        // changed shortcuts: "action=keys;..." (Shortcuts.cpp)
 	bool checkUpdates = true;     // look for a new version now and then
@@ -109,8 +112,12 @@ struct Prefs {
 	// first launch after an update (the What's New version it introduced).
 	bool introFirstLaunchPlayed = false;
 	std::string introUpdatePlayed;
-	// Settings > General: the intro at every launch, silently (off unless chosen).
-	bool introEveryLaunch = false;
+	// Settings > General > Launch screen, "When CedarLogic opens" (Intro.h's
+	// AtLaunch: 0 the short intro, everyone's to begin with; 1 the full one;
+	// 2 the classic launch screen; 3 none). Saved as "short", "full",
+	// "classic" or "none"; settled once from 0.3's "Play the intro every time
+	// CedarLogic opens" (intro::settleAtLaunch).
+	int introAtLaunch = 0;
 	std::string seenWhatsNew;
 	// Export as Image: the grid, the name-and-result strip, the style and size.
 	bool exportGrid = false, exportInfo = true, exportWorks = true, exportColor = true;
@@ -121,18 +128,29 @@ struct Prefs {
 	// Export Lab Report: what goes in, and colour or black and white.
 	bool reportCircuit = true, reportTable = true, reportFormulas = true, reportTiming = true, reportColor = true;
 	bool timingWhole = false, timingInColor = false;                     // the What's New last shown (whatsnew::kVersion)
-	// The Actions rail (Actions.h), as the Mac's cl.actions.*: where the
-	// actions go (0 On screen, 1 In the toolbar, 2 Hidden), the rail folded to
-	// its tab as it was left, sliding out when the pointer reaches the
-	// window's right edge, every action in the Customize list's order and the
-	// ones ticked there, and the one-time status line for someone who had
-	// CedarLogic before the rail.
-	int actionsMode = 0;
+	// The Actions panel (Actions.h, the "rail" in the code), as the Mac's
+	// cl.actions.*: Settings > Actions > Show the Actions panel (on, or none:
+	// everything is still in the menus), the panel folded to its tab as it
+	// was left, Open on hover (folded, it slides out when the pointer reaches
+	// the window's right edge), every action in the Customize list's order
+	// and the ones ticked there. 0.4 turned it on, and unfolded it, once for
+	// everyone (actionsStart); after that the choice is theirs.
+	bool actionsOn = true;
 	bool actionsCollapsed = false;
 	bool actionsHoverOpen = true;
 	std::vector<std::string> actionsOrder;
 	std::vector<std::string> actionsShown;
-	bool actionsHint = false;
+	// Help > Show Me Around (ShowMeAround.h) has been finished or skipped:
+	// until then it starts by itself.
+	bool showMeAroundSeen = false;
+	// Crash reports and usage stats (Privacy.h, docs/PRIVACY.md), asked once,
+	// as the Mac's cl.crashReports, cl.usageStats, cl.privacyAsked and
+	// cl.privacyChoice (and the Windows app's). The usage id and what's counted
+	// are in ~/.config/CedarLogic/usage.json (UsageReport.h), not here.
+	int crashReports = -1;        // -1 not chosen yet, 0 off, 1 on (CrashReports.h)
+	bool usageStats = false;      // the switch
+	bool privacyAsked = false;
+	std::string privacyChoice;    // "yes", "no" or "custom" ("" not asked)
 
 	double wireScale() const;
 	void load();
@@ -149,13 +167,17 @@ Prefs& prefs();
 struct ChannelStart { int channel; bool notice; };
 ChannelStart startingChannel(bool prefsExisted, bool hasChannel, int storedChannel, bool storedNotice, const std::string& marker);
 
-// Where the Actions rail starts (Prefs::load), as the Mac decides it: a
-// choice made before stays; else a new install gets it On screen, and anyone
-// who used CedarLogic before (settings with the brand accent or the welcome
-// seen in them) gets Hidden, so their window doesn't change, and a one-time
-// status line saying where it is.
-struct ActionsStart { int mode; bool hint; };
-ActionsStart actionsStart(bool usedBefore, bool hasMode, int storedMode, bool storedHint);
+// The Actions panel at a launch (Prefs::load), as the Mac's
+// Prefs.migrateActions: 0.4 turns it on for everyone once (new installs and
+// updated ones, whatever the old On screen / In the toolbar / Hidden said:
+// the `actionsOn04` key), and unfolds it once (`actionsOpen04`). After those,
+// what's saved stays. `existed`: there was a settings file.
+struct ActionsStart { bool on; bool collapsed; };
+ActionsStart actionsStart(bool existed, bool migrated, bool storedOn, bool opened, bool storedCollapsed);
+
+// The project's address, for questions (Help > About CedarLogic, as a
+// mailto link). Send Feedback stays the way to report a problem.
+#define CL_CONTACT_EMAIL "cedarlogic@proton.me"
 
 // Whether the desktop asks for dark (GNOME's color-scheme, or a "-dark"
 // theme name).
@@ -167,6 +189,22 @@ void applyStyle();
 // A desktop font in a light weight (Raspberry Pi OS's PibotoLt) swapped for
 // the regular weight of its family, for this app; before anything draws text.
 void sturdyUiFont();
+// The mouse wheel over a dropdown, number box or slider scrolls whatever it
+// sits in (Settings' page, a dialog's list) instead of changing its value,
+// everywhere in the app (Style.cpp). Once, at startup.
+void wheelLeavesValuesAlone();
+// The part of the screen a window over `near` can use (Style.cpp): the
+// monitor's work area, less a margin, and less room for a panel when the
+// desktop doesn't say where its panels are (Wayland, and X without a window
+// manager, report the whole monitor).
+GdkRectangle usableArea(GtkWidget* near);
+// The app is on a Wayland desktop (where it can't place its windows).
+bool onWayland();
+// What of `w` takes the pointer (null: all of it; an empty region: none), in
+// its points (Style.cpp). Also for the window a GtkOverlay puts an overlay
+// child in, which otherwise takes every press over the child's whole box
+// (and the overlay's pass-through, which would, upsets the crossing events).
+void inputShape(GtkWidget* w, const cairo_region_t* region);
 
 // ---- Files -----------------------------------------------------------------------
 
@@ -222,6 +260,8 @@ void readyForKeys(GtkWidget* revealer, GtkWidget* field);
 
 // Open a URL or a file in the desktop's default app.
 void openExternally(GtkWindow* parent, const std::string& uri);
+// Help > Learn Logic Online…: the website's lessons (the Mac's AppActions.learnOnlineURL).
+constexpr const char* kLearnOnlineUrl = "https://cedarlogic.netlify.app/learn/";
 
 // ---- Staying up ------------------------------------------------------------------
 // Every place GTK calls into the app runs through guarded(): if the engine

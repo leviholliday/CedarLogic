@@ -270,6 +270,9 @@ public:
 	~Scene();
 	void draw(ID2D1RenderTarget* rt, double t);
 	void releasePaint() { paint.release(); }
+	// The short intro: no icon flying to the panel; the display goes with
+	// the circuit, into the bloom.
+	bool shortIntro = false;
 
 	static const float kCardIconSize;
 
@@ -795,8 +798,10 @@ void Scene::draw(ID2D1RenderTarget* rt, double t) {
 	}
 
 	// The seven-segment display, which stays a little longer: until the
-	// launch screen's panel comes in.
-	const double displayShown = smooth(t, 1.86, 2.0) * (1 - smooth(t, kCardIn, kCardIn + kCardFade));
+	// launch screen's panel comes in. (In the short intro, with no panel, it
+	// goes with the circuit, into the bloom.)
+	const double displayGoes = shortIntro ? smooth(t, bloomAt + 0.12, bloomAt + 0.32) : smooth(t, kCardIn, kCardIn + kCardFade);
+	const double displayShown = smooth(t, 1.86, 2.0) * (1 - displayGoes);
 	if (displayShown > 0.002) {
 		rt->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(),
 		                                    (float)displayShown),
@@ -841,9 +846,10 @@ void Scene::draw(ID2D1RenderTarget* rt, double t) {
 	const float side = mix(bigSide, cardSide);
 	const float x = mix(bigAt.x, cardIcon.x - cardSide / 2), y = mix(bigAt.y, cardIcon.y - cardSide / 2);
 	const Pt iconMid = D2D1::Point2F(x + side / 2, y + side / 2);
-	// Gone into the panel's own icon as the panel finishes coming in.
+	// Gone into the panel's own icon as the panel finishes coming in. (The
+	// short intro has none: its bloom goes straight into the window.)
 	const double landed = kCardIn + kCardFade;
-	const double iconShown = smooth(t, bloomAt + 0.05, bloomAt + 0.26) * (1 - smooth(t, landed - 0.14, landed));
+	const double iconShown = shortIntro ? 0 : smooth(t, bloomAt + 0.05, bloomAt + 0.26) * (1 - smooth(t, landed - 0.14, landed));
 	if (iconShown > 0.002) {
 		glowAt(rt, paint.glow, iconMid, side * 1.9f / 2, side * 1.9f / 2, iconShown * (0.55 + 0.25 * (1 - fly)));
 		if (paint.icon) rt->DrawBitmap(paint.icon, D2D1::RectF(x, y, x + side, y + side), (float)iconShown, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
@@ -973,6 +979,7 @@ struct Player {
 	float scale = 1, corner = 0;
 	ID2D1DCRenderTarget* rt = nullptr;
 	Scene* scene = nullptr;
+	Trigger trigger = Trigger::First;
 	double start = 0, skipAt = -1, freezeAt = -1;
 	bool passThrough = false;
 
@@ -1004,11 +1011,11 @@ struct Player {
 	// screen (quickly, when skipped).
 	double shown(double now) const {
 		const double t = now - start;
-		const double out = skipAt >= 0 ? inOut((now - skipAt) / kSkipFade) : inOut((t - kDissolveAt) / kFade);
+		const double out = skipAt >= 0 ? inOut((now - skipAt) / kSkipFade) : inOut((t - dissolveFor(trigger)) / fadeFor(trigger));
 		return fadeInShown(t) * (1 - out);
 	}
 	bool finished(double now) const {
-		return skipAt >= 0 ? now - skipAt >= kSkipFade + 0.05 : now - start >= kTotal + 0.05;
+		return skipAt >= 0 ? now - skipAt >= kSkipFade + 0.05 : now - start >= lengthFor(trigger) + 0.05;
 	}
 
 	void frame() {
@@ -1018,7 +1025,7 @@ struct Player {
 		if (freezeAt >= 0) t = std::min(t, freezeAt);
 		// Dissolving: the windows are coming in under it, and the pointer
 		// goes through to them.
-		if (!passThrough && (skipAt >= 0 || now - start >= kDissolveAt)) {
+		if (!passThrough && (skipAt >= 0 || now - start >= dissolveFor(trigger))) {
 			passThrough = true;
 			SetWindowLongPtrW(hwnd, GWL_EXSTYLE, GetWindowLongPtrW(hwnd, GWL_EXSTYLE) | WS_EX_TRANSPARENT);
 		}
@@ -1166,7 +1173,11 @@ Trigger owed(const Prefs& p) {
 Trigger forLaunch(const Prefs& p) {
 	const Trigger t = owed(p);
 	if (t != Trigger::None) return t;
-	return p.introEveryLaunch ? Trigger::Every : Trigger::None;
+	switch (p.introAtLaunch) {
+	case AtShort: return Trigger::Short;
+	case AtFull: return Trigger::Every;
+	default: return Trigger::None;   // Classic launch screen, None
+	}
 }
 
 Trigger pending() {
@@ -1174,17 +1185,55 @@ Trigger pending() {
 		if (!allowed()) return Trigger::None;
 		if (envSet(L"CL_INTRO")) {
 			const std::string v = envValue(L"CL_INTRO");
-			return v == "update" ? Trigger::Update : v == "every" ? Trigger::Every : Trigger::First;
+			return v == "update" ? Trigger::Update : v == "every" ? Trigger::Every : v == "short" ? Trigger::Short : Trigger::First;
 		}
 		return forLaunch(prefs());
 	}();
 	return once;
 }
 
+bool straightInFor(const Prefs& p) { return forLaunch(p) == Trigger::None && p.introAtLaunch == AtNone; }
+
+bool straightIn() { return allowed() && !envSet(L"CL_INTRO") && straightInFor(prefs()); }
+
+const char* atLaunchTitle(int c) {
+	switch (c) {
+	case AtFull: return "Full intro";
+	case AtClassic: return "Classic launch screen";
+	case AtNone: return "None";
+	default: return "Short intro";
+	}
+}
+
+const char* atLaunchKey(int c) {
+	switch (c) {
+	case AtFull: return "full";
+	case AtClassic: return "classic";
+	case AtNone: return "none";
+	default: return "short";
+	}
+}
+
+int atLaunchFromKey(const std::string& k) {
+	for (int c = AtShort; c <= AtNone; c++) if (k == atLaunchKey(c)) return c;
+	return -1;
+}
+
+std::string atLaunchHint(int c) {
+	const std::string always =
+		" The first launch and the first after an update always play the full intro, with its sound. Help \u25B8 Play the Intro plays it any time.";
+	switch (c) {
+	case AtFull: return "The circuit draws itself, then the launch screen, as on the first launch, without its sound." + always;
+	case AtClassic: return "The launch screen as it was before the intro: CedarLogic's panel, a sweep of light, and the window, silent." + always;
+	case AtNone: return "Straight into the circuit window, no launch screen." + always;
+	default: return "The circuit draws itself, then the window opens: about three and a half seconds, silent." + always;
+	}
+}
+
 void markPlayed(Trigger t) {
 	if (t == Trigger::First) prefs().introFirstLaunchPlayed = true;
 	else if (t == Trigger::Update) prefs().introUpdatePlayed = whatsnew::kVersion;
-	else return;   // every launch's: nothing to keep
+	else return;   // every launch's, or a short one: nothing to keep
 	prefs().save();
 }
 
@@ -1217,7 +1266,7 @@ void skip() {
 	}
 }
 
-double play(POINT cardIcon, CircuitWindow* over) {
+double play(POINT cardIcon, Trigger trigger, CircuitWindow* over) {
 	if (g_player) return -1;
 	HMONITOR splashScreen = MonitorFromPoint(cardIcon, MONITOR_DEFAULTTOPRIMARY);
 	Player* p = new Player();
@@ -1232,6 +1281,8 @@ double play(POINT cardIcon, CircuitWindow* over) {
 	if (!freeze.empty()) p->freezeAt = atof(freeze.c_str());
 	const Pt icon = D2D1::Point2F((cardIcon.x - area.left) / p->scale, (cardIcon.y - area.top) / p->scale);
 	p->scene = new Scene(p->pw / p->scale, p->ph / p->scale, icon, WireLook::current());
+	p->trigger = trigger;
+	p->scene->shortIntro = isShort(trigger);
 	static bool registered = false;
 	if (!registered) {
 		registered = true;
@@ -1285,9 +1336,12 @@ bool render(const std::string& dir, Trigger trigger, IWICBitmap* behind, std::st
 	// The launch screen's panel: 560 by 372, a little above the middle.
 	const Pt panel = D2D1::Point2F(width / 2 - 280, height / 2 - 36 - 186);
 	Scene* scene = new Scene(width, height, D2D1::Point2F(width / 2, panel.y + 44 + 64), WireLook::current());
+	scene->shortIntro = isShort(trigger);
 	ID2D1Bitmap* window = nullptr;
 	if (behind) rt->CreateBitmapFromWicBitmap(behind, &window);
-	const int frames = (int)std::lround(kTotal * 60);
+	// The short intro: 3.55 s, 0 to 213 (214 frames); the full one 6.07 s, 365.
+	const double dissolve = dissolveFor(trigger), fade = fadeFor(trigger);
+	const int frames = (int)std::lround(lengthFor(trigger) * 60);
 	int written = 0;
 	for (int f = 0; f <= frames; f++) {
 		const double t = f / 60.0;
@@ -1297,8 +1351,8 @@ bool render(const std::string& dir, Trigger trigger, IWICBitmap* behind, std::st
 		rt->Clear(D2D1::ColorF(0, 0, 0, 1));
 		// The window under it all, put in as the dissolve begins, the intro
 		// and the panel fading off it.
-		const double out = inOut((t - kDissolveAt) / kFade);
-		if (window && t >= kDissolveAt) rt->DrawBitmap(window, D2D1::RectF(0, 0, width, height), 1, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+		const double out = inOut((t - dissolve) / fade);
+		if (window && t >= dissolve) rt->DrawBitmap(window, D2D1::RectF(0, 0, width, height), 1, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
 		const double shown = (1 - out) * fadeInShown(t);
 		if (shown > 0.002) {
 			rt->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(),
@@ -1307,8 +1361,9 @@ bool render(const std::string& dir, Trigger trigger, IWICBitmap* behind, std::st
 			scene->draw(rt, t);
 			rt->PopLayer();
 		}
-		// The launch screen's panel, from its own drawing at its own time.
-		if (t >= kCardIn) splash::drawAfterIntro(rt, panel, t);
+		// The launch screen's panel, from its own drawing at its own time
+		// (the short intro has none).
+		if (!isShort(trigger) && t >= kCardIn) splash::drawAfterIntro(rt, panel, t);
 		if (FAILED(rt->EndDraw())) { report = strf("frame %d didn't draw", f); break; }
 		if (!images::savePng(bmp, dir + strf("\\frame-%04d.png", f))) { report = strf("couldn't write frame %d", f); break; }
 		written++;
@@ -1320,7 +1375,8 @@ bool render(const std::string& dir, Trigger trigger, IWICBitmap* behind, std::st
 	bmp->Release();
 	wic->Release();
 	if (written != frames + 1) return false;
-	report = strf("%d frames (%s) in %s", written, trigger == Trigger::Update ? "update" : "first", dir.c_str());
+	const char* name = trigger == Trigger::Update ? "update" : trigger == Trigger::Every ? "every" : trigger == Trigger::Short ? "short" : "first";
+	report = strf("%d frames (%s, %.2f s) in %s", written, name, lengthFor(trigger), dir.c_str());
 	return true;
 }
 

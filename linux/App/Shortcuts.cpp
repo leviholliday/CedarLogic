@@ -146,7 +146,7 @@ const std::vector<Action>& all() {
 		{ "focusMode", "Moving around", "Focus mode: hide the toolbar and side panel", "win.focus-mode", "<Primary>period" },
 		{ "fullScreen", "Moving around", "Full screen", "win.fullscreen", "F11" },
 		// F9: the desktop's usual key for a side pane (Files, Text Editor); the Mac's is Ctrl+Cmd+S.
-		{ "toggleActions", "Moving around", "Show or hide the Actions rail", "win.toggle-actions", "F9" },
+		{ "toggleActions", "Moving around", "Show or hide the Actions panel", "win.toggle-actions", "F9" },
 		{ "simView", "Simulation", "Simulation view", "win.sim-view", "<Primary>r" },
 		{ "step", "Simulation", "Step once", "win.step", "<Primary><Shift>r" },
 		{ "stepClock", "Simulation", "Step Clock: one full cycle of each manual clock", nullptr, "k" },

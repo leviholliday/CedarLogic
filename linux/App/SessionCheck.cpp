@@ -9,6 +9,8 @@
 #include "Library.h"
 #include "Notes.h"
 #include "Settings.h"
+#include "ShowMeAround.h"
+#include "Welcome.h"
 #include "TabStrip.h"
 #include "TabSwitcher.h"
 #include "Window.h"
@@ -762,7 +764,11 @@ struct SessionDriver {
 
 	// Every window over the circuit window, looked at: poked a few times, then
 	// asked to close (Escape, then its close button); one that won't is a FAIL.
+	// Show Me Around's checks drive the welcome and What's New themselves.
+	bool watchPaused = false;
+
 	void watch() {
+		if (watchPaused) return;
 		const double now = nowMs();
 		GList* all = gtk_window_list_toplevels();
 		std::vector<GtkWidget*> tops;
@@ -1205,6 +1211,54 @@ struct SessionDriver {
 
 	// The engine's history, past its 500 steps: every step is still saved, and
 	// undoing everything then redoing it brings the circuit back.
+	// What has the keys now, for a FAIL line: the window's focus widget,
+	// GTK's grab, the windows over it, and the canvas's state.
+	std::string keyState() {
+		Canvas* c = canvas();
+		GtkWidget* focus = gtk_window_get_focus(w->window());
+		GtkWidget* grab = gtk_grab_get_current();
+		GtkWidget* grabTop = grab ? gtk_widget_get_toplevel(grab) : nullptr;
+		const char* grabTitle = grabTop && GTK_IS_WINDOW(grabTop) ? gtk_window_get_title(GTK_WINDOW(grabTop)) : nullptr;
+		return format("focus %s%s, grab %s (%s), %d window(s) over it, canvas %s, %d gates on page %d, floating %d, pending %d, tidy %d, "
+		              "editable %d, drawing %d, walk %d, welcome %d, active %d",
+		              focus ? G_OBJECT_TYPE_NAME(focus) : "none", focus && c && focus == c->widget() ? " (the canvas)" : "",
+		              grab ? G_OBJECT_TYPE_NAME(grab) : "none", grabTitle ? grabTitle : (grabTop ? gtk_widget_get_name(grabTop) : "-"), windowsOver(),
+		              c ? (gtk_widget_get_mapped(c->widget()) ? "mapped" : "not mapped") : "none", cl_document_gate_count(doc(), w->currentPage()),
+		              w->currentPage(), w->isFloating(), w->hasPendingGate(), w->tidyActive(), w->canEdit(), w->drawing(), showme::active(),
+		              welcome::window() != nullptr, gtk_window_is_active(w->window()));
+	}
+
+	// Ctrl+A, as a person presses it, until it has selected something: first
+	// whatever had the keys is put away (a window over the circuit, a grab,
+	// Show Me Around, a part on the pointer) and the keyboard is on the
+	// canvas, so the nudges after it move something. False (with why) when
+	// three tries selected nothing.
+	bool selectAllByKey(std::string& why) {
+		for (int attempt = 0; attempt < 3; attempt++) {
+			waitForWindowsOver();
+			if (showme::active()) showme::stop();
+			settle();
+			Canvas* c = canvas();
+			if (c == nullptr) { why = "no canvas"; return false; }
+			if (cl_document_gate_count(doc(), w->currentPage()) == 0) { placePart(); settle(); }
+			// The keyboard on the canvas, and no grab elsewhere (a window going
+			// away hands both back on its own time).
+			for (int i = 0; i < 50; i++) {
+				if (gtk_window_get_focus(w->window()) != c->widget()) gtk_widget_grab_focus(c->widget());
+				if (gtk_window_get_focus(w->window()) == c->widget() && gtk_grab_get_current() == nullptr && gtk_widget_get_mapped(c->widget())) break;
+				pump(40);
+			}
+			tap(top(), GDK_KEY_a, GDK_CONTROL_MASK);
+			pump(30);
+			if (w->hasSelection()) {
+				if (attempt > 0) printf("  (Ctrl+A selected on try %d; before: %s)\n", attempt + 1, why.c_str());
+				return true;
+			}
+			why += (why.empty() ? "" : "; ") + format("try %d: ", attempt + 1) + keyState();
+		}
+		return false;
+	}
+
 	void longHistory(int at) {
 		settle();
 		// The action just before may have opened a window over this one (a
@@ -1218,18 +1272,9 @@ struct SessionDriver {
 		if (cl_document_gate_count(doc(), w->currentPage()) == 0) placePart();
 		settle();   // a part placePart left on the pointer is dropped
 		w->runAction("win.unlock-all");
-		if (Canvas* c = canvas()) gtk_widget_grab_focus(c->widget());
-		tap(top(), GDK_KEY_a, GDK_CONTROL_MASK);
-		pump(10);
-		if (!w->hasSelection()) {
-			// Something still had the keys (a window going, a part on the pointer): once more.
-			waitForWindowsOver();
-			settle();
-			if (Canvas* c = canvas()) gtk_widget_grab_focus(c->widget());
-			tap(top(), GDK_KEY_a, GDK_CONTROL_MASK);
-			pump(30);
-		}
-		const bool selected = w->hasSelection();
+		std::string why;
+		const bool selected = selectAllByKey(why);
+		if (!selected) printf("  (Ctrl+A: %s)\n", why.c_str());
 		// Each nudge is a step of its own (the engine merges none), so 520 of
 		// them always fill the history, whatever was on it before.
 		const long made0 = cl_edit_steps_made(doc());
@@ -1480,6 +1525,267 @@ struct SessionDriver {
 		}
 	}
 
+	// ---- The canvas at the window's right edge, with the real pointer -----------------
+	// (The rest of the session hands its events to the widgets themselves;
+	// here the display delivers them, as a mouse would: xdotool moves the
+	// real pointer and presses its button, and GTK finds the window under
+	// it. A layer over the canvas that takes presses shows only this way.)
+	// In each of: the Actions panel open; folded with Open on hover; folded
+	// without it; and focus mode (folded) with and without it: every point
+	// of the canvas along its right edge, across the band the panel's labels
+	// are drawn in, and across the canvas, is the canvas's own under the
+	// pointer, even with the folded tab peeking; a box drawn from inside the
+	// folded panel's 12-point hot strip (or the 12 points beside the open
+	// panel) leftwards selects the part it goes round, and a part pressed
+	// there is dragged left, with the panel never sliding out over the drag;
+	// the wheel there reaches the canvas; and the folded tab itself still
+	// opens the panel with a click.
+	static bool xdo(const std::vector<std::string>& args) {
+		std::vector<gchar*> argv;
+		argv.push_back((gchar*)"xdotool");
+		for (const std::string& a : args) argv.push_back(const_cast<gchar*>(a.c_str()));
+		argv.push_back(nullptr);
+		gint status = 1;
+		const bool ran = g_spawn_sync(nullptr, argv.data(), nullptr, (GSpawnFlags)(G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL),
+		                              nullptr, nullptr, nullptr, nullptr, &status, nullptr);
+		return ran && g_spawn_check_exit_status(status, nullptr);
+	}
+	static std::string num(double v) { return format("%d", (int)std::lround(v)); }
+	// (x, y) in `widget`'s points, on the screen.
+	static bool onScreen(GtkWidget* widget, double x, double y, std::string& rx, std::string& ry) {
+		GdkWindow* gw = gtk_widget_get_window(widget);
+		if (gw == nullptr) return false;
+		int ox = 0, oy = 0;
+		gdk_window_get_origin(gw, &ox, &oy);
+		GtkAllocation a;
+		gtk_widget_get_allocation(widget, &a);
+		if (!gtk_widget_get_has_window(widget)) { ox += a.x; oy += a.y; }
+		rx = num(ox + x);
+		ry = num(oy + y);
+		return true;
+	}
+	// The real pointer to (x, y) in `widget`'s points (it moves there before this returns).
+	static bool pointerTo(GtkWidget* widget, double x, double y) {
+		std::string rx, ry;
+		return onScreen(widget, x, y, rx, ry) && xdo({ "mousemove", "--sync", rx, ry });
+	}
+	// There, and the button down, in one go (as a hand does: no time for the panel to slide out first).
+	static bool pressAt(GtkWidget* widget, double x, double y) {
+		std::string rx, ry;
+		return onScreen(widget, x, y, rx, ry) && xdo({ "mousemove", "--sync", rx, ry, "mousedown", "1" });
+	}
+	// The widget whose window is under the real pointer now, as GTK picks it for a press.
+	static GtkWidget* underPointer() {
+		GdkDevice* p = pointer();
+		if (p == nullptr) return nullptr;
+		double wx = 0, wy = 0;
+		GdkWindow* gw = gdk_device_get_window_at_position_double(p, &wx, &wy);
+		gpointer owner = nullptr;
+		if (gw) gdk_window_get_user_data(gw, &owner);
+		return owner ? GTK_WIDGET(owner) : nullptr;
+	}
+
+	void edgeChecks() {
+		gWhat = "the canvas at the window's right edge";
+		Rail* r = w->rail();
+		const bool x11 = strcmp(G_OBJECT_TYPE_NAME(gdk_display_get_default()), "GdkX11Display") == 0;
+		gchar* tool = g_find_program_in_path("xdotool");
+		const bool haveTool = tool != nullptr;
+		g_free(tool);
+		if (!x11) {
+			// (xdotool's pointer is X's: on a Wayland desktop, run it with GDK_BACKEND=x11 under Xvfb.)
+			printf("session: the canvas at the right edge not checked: not an X display (%s)\n", G_OBJECT_TYPE_NAME(gdk_display_get_default()));
+			return;
+		}
+		if (!check(haveTool && r, "xdotool, to move the real pointer (sudo apt install xdotool)")) return;
+		const int page = w->currentPage();
+		struct Setup { const char* name; bool folded, hover, focus; };
+		const Setup setups[] = {
+			{ "the Actions panel open", false, true, false },
+			{ "folded, Open on hover on", true, true, false },
+			{ "folded, Open on hover off", true, false, false },
+			{ "focus mode, Open on hover on", true, true, true },
+			{ "focus mode, Open on hover off", true, false, true },
+		};
+		for (const Setup& su : setups) {
+			const std::string in = std::string(" (") + su.name + ")";
+			prefs().actionsOn = true;
+			prefs().actionsCollapsed = su.folded;
+			prefs().actionsHoverOpen = su.hover;
+			actions::changed();
+			if (su.focus != w->focusMode()) w->toggleFocusMode();
+			pump(700);
+			Canvas* c = canvas();
+			if (c == nullptr) return;
+			GtkWidget* cw = c->widget();
+			const double W = c->width(), H = c->height();
+			// A known zoom (a part about 80 points across), wherever the view is.
+			{
+				Canvas::View v = c->view();
+				v.upp = 0.05;
+				v.needsFit = false;
+				c->setView(v);
+			}
+			auto away = [&] {
+				pointerTo(cw, W / 2, H / 2);
+				pump(60);
+			};
+			away();
+			check(r->folded() == su.folded && !r->slidOut(), "the panel is " + std::string(su.folded ? "folded" : "open") + in + ": " + r->describe());
+			// Every point: the canvas's, under the pointer.
+			std::vector<double> xs = { W - 1, W - 2, W - 3, W - 4, W - 5, W - 6, W - 8, W - 11, W - 12, W - 20, W - 46, W - 60, W - 100, W - 160,
+			                           W - 220, W - 300, W - 360, W - 380 };
+			for (double x = 20; x < W - 380; x += 60) xs.push_back(x);
+			int points = 0, blocked = 0;
+			std::string firstBlocked;
+			for (double y : { 12.0, H / 2, H - 12 }) {
+				for (double x : xs) {
+					if (x < 1) continue;
+					if (!pointerTo(cw, x, y)) continue;
+					pump(25);
+					GtkWidget* got = underPointer();
+					if (got != cw && r->slidOut()) {
+						// Out on hover (as it should after 100 ms in the strip, if this
+						// was slow to get here): back in, and that point again.
+						away();
+						pump(700);
+						if (!pointerTo(cw, x, y)) continue;
+						pump(25);
+						got = r->slidOut() ? cw : underPointer();
+					}
+					points++;
+					if (got != cw) {
+						blocked++;
+						if (firstBlocked.empty())
+							firstBlocked = format(" (first at %.0f, %.0f of %.0f x %.0f: %s)", x, y, W, H, got ? G_OBJECT_TYPE_NAME(got) : "nothing");
+					}
+					// Out of the strip again before the panel would slide out.
+					if (x >= W - 12) away();
+				}
+			}
+			check(points > 0 && blocked == 0, format("every one of %d points along the canvas's right edge, across the labels' band and across the "
+			                                         "canvas is the canvas's under the pointer (%d not)",
+			                                         points, blocked) + firstBlocked + in);
+			// A box drawn leftwards from the edge, round a part.
+			double gx = 0, gy = 0;
+			c->worldPoint(W - 110, H / 2, gx, gy);
+			cl_edit_select_none(doc(), page);
+			const bool placed = cl_edit_add_gate(doc(), page, "AA_AND2", gx, gy);
+			const long gate = cl_edit_single_gate(doc(), page);
+			cl_edit_select_none(doc(), page);
+			c->redraw();
+			pump(150);
+			if (!check(placed && gate >= 0, "a part placed 110 points in from the canvas's right edge" + in)) continue;
+			const double x0 = W - 3, y0 = H / 2 - 70;
+			bool slid = false;
+			bool ok = pressAt(cw, x0, y0);
+			pump(40);
+			for (int k = 1; k <= 8 && ok; k++) {
+				ok = pointerTo(cw, x0 - k * 25, y0 + k * 18);
+				pump(30);
+				slid = slid || r->slidOut();
+			}
+			ok = xdo({ "mouseup", "1" }) && ok;
+			pump(200);
+			const int boxed = cl_edit_selected_gate_count(doc(), page);
+			check(ok && boxed == 1 && !slid, format("a box drawn from 3 points inside the edge, leftwards round the part, selects it (%d selected)%s",
+			                                        boxed, slid ? "; the panel slid out over the drag" : "") + in);
+			away();
+			// A part pressed in the strip and dragged left: one put with its
+			// middle 8 points inside the edge, a point of it in the strip found
+			// (the hit test a right-click uses) and pressed there.
+			if (cl_edit_selected_gate_count(doc(), page) > 0) cl_edit_delete(doc(), page);
+			c->worldPoint(W - 8, H / 2, gx, gy);
+			cl_edit_select_none(doc(), page);
+			const long edgeGate = cl_edit_add_gate(doc(), page, "AA_AND2", gx, gy) ? cl_edit_single_gate(doc(), page) : -1;
+			cl_edit_select_none(doc(), page);
+			c->redraw();
+			pump(150);
+			if (!check(edgeGate >= 0, "a part placed at the canvas's right edge" + in)) continue;
+			const long gateHere = edgeGate;
+			double px = 0, py = 0, nx = 0, ny = 0, vx = 0, vy = 0;
+			cl_gate_position(doc(), gateHere, &px, &py);
+			toView(c, px, py, vx, vy);
+			double hitX = -1;
+			for (double x = W - 2; x >= W - 11 && hitX < 0; x -= 1) {
+				double wx = 0, wy = 0;
+				c->worldPoint(x, vy, wx, wy);
+				if (cl_edit_context(doc(), page, wx, wy, c->unitsPerPoint()) == CL_CONTEXT_GATE && cl_edit_single_gate(doc(), page) == gateHere) hitX = x;
+				cl_edit_select_none(doc(), page);
+			}
+			cl_gate_position(doc(), gateHere, &px, &py);
+			slid = false;
+			ok = hitX > 0 && pressAt(cw, hitX, vy);
+			pump(40);
+			for (int k = 1; k <= 8 && ok; k++) {
+				ok = pointerTo(cw, hitX - k * 20, vy);
+				pump(30);
+				slid = slid || r->slidOut();
+			}
+			ok = xdo({ "mouseup", "1" }) && ok;
+			pump(200);
+			cl_gate_position(doc(), gateHere, &nx, &ny);
+			const double moved = (px - nx) / c->unitsPerPoint();
+			check(ok && moved > 100 && !slid, format("a part pressed %.0f points inside the edge and dragged left moves with the pointer (%.0f points)%s",
+			                                         hitX > 0 ? W - hitX : -1.0, moved, slid ? "; the panel slid out over the drag" : "") + in);
+			away();
+			// The wheel at the edge: the canvas's (it zooms or moves the view).
+			const Canvas::View before = c->view();
+			{
+				std::string rx, ry;
+				ok = onScreen(cw, W - 4, H / 2, rx, ry) && xdo({ "mousemove", "--sync", rx, ry, "click", "5" });
+			}
+			pump(250);
+			const Canvas::View after = c->view();
+			check(ok && (after.upp != before.upp || after.originX != before.originX || after.originY != before.originY),
+			      "the wheel 4 points inside the edge reaches the canvas" + in);
+			c->setView(before);
+			away();
+			// The part goes again.
+			cl_edit_select_none(doc(), page);
+			if (cl_edit_press(doc(), page, nx, ny, 0, c->unitsPerPoint()) == CL_PRESS_PART) cl_edit_release(doc(), nx, ny);
+			if (cl_edit_single_gate(doc(), page) == gateHere) cl_edit_delete(doc(), page);
+			c->redraw();
+			pump(100);
+			// Folded, the tab itself still takes a click (opening the panel);
+			// with Open on hover, once it's slid out (100 ms there), a click on
+			// its edge keeps it open, as on the Mac.
+			if (su.folded && !su.focus) {
+				GtkWidget* dock = r->dockWidget();
+				const double ty = gtk_widget_get_allocated_height(dock) / 2.0;
+				std::string rx, ry, what;
+				if (!su.hover) {
+					ok = dock && onScreen(dock, 3, ty, rx, ry) && xdo({ "mousemove", "--sync", rx, ry, "click", "1" });
+					what = "a click on the folded tab opens the panel";
+				} else {
+					// (Away first, and long enough for anything out to go back; then
+					// onto the tab and left there. Again if the display was slow to say so.)
+					away();
+					pump(800);
+					r->clearTrace();
+					for (int tries = 0; tries < 3 && dock && !r->slidOut(); tries++) {
+						ok = pointerTo(dock, 2 + tries, ty + tries * 20);
+						pump(600);
+					}
+					ok = ok && r->slidOut();
+					GtkWidget* f = r->floaterWidget();
+					ok = ok && f && onScreen(f, 2, ty, rx, ry) && xdo({ "mousemove", "--sync", rx, ry, "click", "1" });
+					what = "slid out on hover, a click on its edge keeps the panel open";
+				}
+				pump(400);
+				check(ok && !r->folded(), what + in + ": " + r->describe());
+				away();
+				pump(600);
+			}
+		}
+		// As it was.
+		if (w->focusMode()) w->toggleFocusMode();
+		prefs().actionsCollapsed = false;
+		prefs().actionsHoverOpen = true;
+		actions::changed();
+		pump(500);
+	}
+
 	// ---- The Actions rail, through the window's own events ---------------------------
 	// (The Mac's launch-selftest `actions` state.) On screen and open; focus
 	// mode folds it to its tab and gives it back; F9 folds and shows it; the
@@ -1492,7 +1798,7 @@ struct SessionDriver {
 		gWhat = "the Actions rail";
 		Rail* r = w->rail();
 		if (!check(r != nullptr && r->dockWidget() != nullptr, "the window has an Actions rail")) return;
-		prefs().actionsMode = actions::OnScreen;
+		prefs().actionsOn = true;
 		prefs().actionsCollapsed = false;
 		prefs().actionsHoverOpen = true;
 		actions::reset();
@@ -1504,7 +1810,7 @@ struct SessionDriver {
 		check(r->itemCount() == 6, format("with the six default actions (%d)", r->itemCount()));
 		w->toggleFocusMode();
 		pump(600);
-		check(gtk_widget_get_mapped(dock) && width() == 6 && prefs().actionsMode == actions::OnScreen && !prefs().actionsCollapsed,
+		check(gtk_widget_get_mapped(dock) && width() == 6 && prefs().actionsOn && !prefs().actionsCollapsed,
 		      format("focus mode folds it to its 6-point tab, not away, and leaves the saved state (%d wide)", width()));
 		w->toggleFocusMode();
 		pump(600);
@@ -1594,6 +1900,326 @@ struct SessionDriver {
 		pump(400);
 	}
 
+	// ---- Show Me Around, through the window's own keys ---------------------------
+	// (The Mac's launch-selftest checks of ShowMeAround.swift.) Its stops and
+	// keys; the panel's stop opening a folded panel and folding it back; the
+	// stop left out with the panel off; Escape ending it for good. Then that
+	// it starts by itself after each of the welcome's ways out (the lesson
+	// after it, when that was the choice) and after What's New, never over a
+	// window, and never again once seen; Help > Show Me Around plays it
+	// whenever. The display here has no window manager, so a window counts
+	// as having the keyboard (setAssumeKeys).
+	template <class F>
+	bool waitFor(F cond, int ms) {
+		for (int t = 0; t < ms && !cond(); t += 50) pump(50);
+		return cond();
+	}
+
+	// Every window over the circuit windows closed, as a person would: Escape,
+	// then (Settings keeps Escape for its search) its close button.
+	static std::vector<GtkWidget*> windowsOverList() {
+		GList* all = gtk_window_list_toplevels();
+		std::vector<GtkWidget*> tops;
+		for (GList* l = all; l; l = l->next) {
+			GtkWidget* t = GTK_WIDGET(l->data);
+			if (gtk_widget_in_destruction(t) || !gtk_widget_get_visible(t) || isCircuitWindow(t) ||
+			    gtk_window_get_window_type(GTK_WINDOW(t)) != GTK_WINDOW_TOPLEVEL)
+				continue;
+			tops.push_back(t);
+		}
+		g_list_free(all);
+		return tops;
+	}
+	void closeWindowsOver() {
+		for (GtkWidget* t : windowsOverList()) tap(t, GDK_KEY_Escape);
+		pump(300);
+		for (GtkWidget* t : windowsOverList()) gtk_window_close(GTK_WINDOW(t));
+		pump(300);
+	}
+
+	// Show Me Around by the real pointer (xdotool, so the display routes the
+	// clicks, as the Raspberry Pi's did): Next on the card clicked through all
+	// its stops, Back once, and on the canvas's stop a click in the lit hole
+	// (away from the card) reaching the canvas.
+	void tourPointerChecks() {
+		gWhat = "Show Me Around by the pointer";
+		const bool x11 = strcmp(G_OBJECT_TYPE_NAME(gdk_display_get_default()), "GdkX11Display") == 0;
+		gchar* tool = g_find_program_in_path("xdotool");
+		const bool haveTool = tool != nullptr;
+		g_free(tool);
+		if (!x11 || !haveTool) {
+			printf("session: Show Me Around by the pointer not checked (%s)\n", x11 ? "no xdotool" : "not an X display");
+			return;
+		}
+		watchPaused = true;
+		showme::setAssumeKeys(true);
+		closeWindowsOver();
+		gtk_window_present(w->window());
+		prefs().actionsOn = true;
+		prefs().actionsCollapsed = false;
+		actions::changed();
+		pump(300);
+		GtkWidget* t = top();
+		showme::start(w, 0);
+		waitFor([] { return showme::active(); }, 2000);
+		const int stops = (int)showme::shown().size();
+		check(showme::activeOn(w) && stops >= 6, format("Show Me Around starts for the pointer's walk (%d stops)", stops));
+		auto clickButton = [&](int which) {
+			waitFor([] { return showme::settled(); }, 2000);
+			pump(120);
+			double bx = 0, by = 0;
+			if (!showme::buttonCenter(which, bx, by)) return false;
+			std::string rx, ry;
+			return onScreen(t, bx, by, rx, ry) && xdo({ "mousemove", "--sync", rx, ry, "click", "1" });
+		};
+		int clicked = 0, wrong = 0;
+		std::string firstWrong;
+		bool backed = false, holeReached = false, holeTried = false;
+		for (int i = 0; i < stops + 2 && showme::active(); i++) {
+			const int at = showme::position();
+			// In the canvas's lit hole, away from the card: what's there takes the click.
+			if (showme::step() == showme::CanvasSpot && !holeTried) {
+				holeTried = true;
+				waitFor([] { return showme::settled(); }, 2000);
+				RectF hole{};
+				const RectF cr0 = showme::cardRect();
+				const RectF card = rectF(cr0.left - 12, cr0.top - 12, cr0.right + 12, cr0.bottom + 12);
+				std::string seen;
+				if (showme::frame(showme::CanvasSpot, hole)) {
+					for (float fy = 0.2f; fy <= 0.8f && !holeReached; fy += 0.2f)
+						for (float fx = 0.15f; fx <= 0.85f && !holeReached; fx += 0.14f) {
+							const double px = hole.left + rectWidth(hole) * fx, py = hole.top + rectHeight(hole) * fy;
+							if (inRect(card, (float)px, (float)py)) continue;
+							std::string rx, ry;
+							if (!onScreen(t, px, py, rx, ry) || !xdo({ "mousemove", "--sync", rx, ry })) continue;
+							pump(40);
+							GtkWidget* u = underPointer();
+							holeReached = u == canvas()->widget();
+							if (!holeReached && seen.size() < 200)
+								seen += format(" %.0f,%.0f: %s;", px, py, u ? (gtk_widget_get_name(u) && *gtk_widget_get_name(u) ? gtk_widget_get_name(u) : G_OBJECT_TYPE_NAME(u)) : "nothing");
+							if (holeReached) { xdo({ "click", "1" }); pump(200); }
+						}
+				}
+				check(holeReached && showme::active(), format("on the canvas's stop, a click in the lit hole (away from the card) reaches the canvas, and the walk goes on (the hole %.0f,%.0f-%.0f,%.0f)",
+				                                              hole.left, hole.top, hole.right, hole.bottom) + seen);
+			}
+			if (!clickButton(0)) { wrong++; if (firstWrong.empty()) firstWrong = format(" (no Next on stop %d)", at); break; }
+			clicked++;
+			waitFor([&] { return !showme::active() || showme::position() != at; }, 1500);
+			if (showme::active() && showme::position() != at + 1) {
+				wrong++;
+				if (firstWrong.empty()) firstWrong = format(" (Next on stop %d of %d left it on %d)", at, stops, showme::position());
+				break;
+			}
+			// Back once, from the second stop, and on again.
+			if (!backed && showme::active() && showme::position() == 2) {
+				backed = true;
+				const bool ok = clickButton(1);
+				waitFor([] { return showme::position() == 1; }, 1500);
+				check(ok && showme::position() == 1, format("Back, clicked on the second stop's card, goes back to the first (on %d)", showme::position()));
+				if (!clickButton(0)) { wrong++; break; }
+				waitFor([] { return showme::position() == 2; }, 1500);
+			}
+		}
+		check(wrong == 0 && clicked >= stops && !showme::active(),
+		      format("Next, clicked with the pointer on every stop's card, goes through all %d stops and ends it (%d clicks)", stops, clicked) + firstWrong);
+		if (showme::active()) showme::stop();
+		showme::setAssumeKeys(false);
+		watchPaused = false;
+		pump(300);
+	}
+
+	void tourChecks() {
+		gWhat = "Show Me Around";
+		watchPaused = true;
+		showme::setAssumeKeys(true);
+		GtkWidget* t = top();
+		Rail* r = w->rail();
+		auto stepName = [] { return std::string(showme::spotName(showme::step())); };
+		// ---- Its stops, by the keys ----
+		prefs().actionsOn = true;
+		prefs().actionsCollapsed = true;   // folded: its stop opens it
+		prefs().showMeAroundSeen = false;
+		actions::changed();
+		pump(300);
+		w->runAction("win.show-me-around");
+		waitFor([] { return showme::active(); }, 2000);
+		pump(500);
+		check(showme::activeOn(w) && showme::step() == showme::Palette && showme::position() == 1 && showme::shown().size() == 7,
+		      format("Help ▸ Show Me Around starts on this window at its first stop, the parts (%s, %d of %zu)", stepName().c_str(),
+		             showme::position(), showme::shown().size()));
+		{
+			RectF f{}, card = showme::cardRect();
+			const bool lit = showme::frame(showme::Palette, f);
+			check(lit && card.left >= f.right, format("the card sits right of the side panel (panel to %.0f, card from %.0f)", f.right, card.left));
+		}
+		check(showme::body(showme::Palette).find("press A and type its name") != std::string::npos &&
+		          showme::title(showme::Menus) == "Help and Settings",
+		      "its words are the Mac's (\"" + showme::body(showme::Palette) + "\")");
+		tap(t, GDK_KEY_Right);
+		pump(200);
+		check(showme::step() == showme::CanvasSpot, "Right goes on to the canvas (" + stepName() + ")");
+		tap(t, GDK_KEY_Left);
+		pump(200);
+		check(showme::step() == showme::Palette, "Left goes back (" + stepName() + ")");
+		tap(t, GDK_KEY_Return);
+		pump(200);
+		tap(t, GDK_KEY_space);
+		pump(200);
+		check(showme::step() == showme::ToolbarSpot, "Enter and Space go on too: the toolbar (" + stepName() + ")");
+		const int canvasGates = cl_document_gate_count(doc(), w->currentPage());
+		tap(t, GDK_KEY_a);
+		pump(200);
+		check(showme::active() && w->hasPendingGate() == false && cl_document_gate_count(doc(), w->currentPage()) == canvasGates &&
+		          (!gtk_window_get_focus(w->window()) || !GTK_IS_ENTRY(gtk_window_get_focus(w->window())) ||
+		           !strlen(gtk_entry_get_text(GTK_ENTRY(gtk_window_get_focus(w->window()))))),
+		      "a plain key (A) doesn't reach the canvas meanwhile");
+		const int foldedWidth = r ? gtk_widget_get_allocated_width(r->dockWidget()) : -1;
+		tap(t, GDK_KEY_Right);
+		pump(700);
+		const int heldWidth = r ? gtk_widget_get_allocated_width(r->dockWidget()) : -1;
+		check(showme::step() == showme::ActionsSpot && foldedWidth == 6 && heldWidth == 46 && prefs().actionsCollapsed,
+		      format("at the Actions panel's stop a folded panel opens (%d wide before, %d now; still saved folded: %d)", foldedWidth, heldWidth,
+		             prefs().actionsCollapsed));
+		check(showme::body(showme::ActionsSpot).find("folded to a thin strip") != std::string::npos, "and the stop says it's kept folded");
+		tap(t, GDK_KEY_Right);
+		pump(700);
+		check(showme::step() == showme::Run && r && gtk_widget_get_allocated_width(r->dockWidget()) == 6,
+		      format("at the next stop it folds back (%s, %d wide)", stepName().c_str(), r ? gtk_widget_get_allocated_width(r->dockWidget()) : -1));
+		tap(t, GDK_KEY_Right);
+		pump(200);
+		tap(t, GDK_KEY_Right);
+		pump(200);
+		check(showme::step() == showme::Menus && showme::position() == 7, "the last stop is the menus, 7 of 7 (" + stepName() + ")");
+		tap(t, GDK_KEY_Escape);
+		pump(300);
+		check(!showme::active() && prefs().showMeAroundSeen, "Escape quits, and counts as seen");
+		check(r && gtk_widget_get_allocated_width(r->dockWidget()) == 6 && prefs().actionsCollapsed, "the panel is folded as it was");
+		prefs().actionsCollapsed = false;
+		actions::changed();
+		// ---- Done at the end counts as seen too ----
+		prefs().showMeAroundSeen = false;
+		showme::start(w, 0);
+		pump(300);
+		for (int i = 0; i < 7 && showme::active(); i++) { tap(t, GDK_KEY_Right); pump(150); }
+		check(!showme::active() && prefs().showMeAroundSeen, "Right past the last stop (Done) ends it, seen");
+		// ---- The panel off: its stop is left out ----
+		prefs().actionsOn = false;
+		actions::changed();
+		pump(300);
+		showme::start(w, 0);
+		pump(400);
+		const std::vector<int> v = showme::shown();
+		check(v.size() == 6 && std::find(v.begin(), v.end(), (int)showme::ActionsSpot) == v.end(),
+		      format("with the panel off there are 6 stops, the panel's left out (%zu)", v.size()));
+		tap(t, GDK_KEY_Escape);
+		pump(200);
+		prefs().actionsOn = true;
+		actions::changed();
+		pump(300);
+		// ---- Seen: never again by itself; Help still plays it ----
+		showme::setQuiet(false);
+		showme::startWhenReady();
+		pump(1600);
+		check(!showme::active() && !showme::watching(), "once seen, it doesn't start by itself");
+		w->runAction("win.show-me-around");
+		waitFor([] { return showme::active(); }, 1500);
+		check(showme::activeOn(w), "Help ▸ Show Me Around plays it again whenever");
+		tap(t, GDK_KEY_Escape);
+		pump(200);
+		// ---- Not seen: it waits for a window over the circuit to go ----
+		prefs().showMeAroundSeen = false;
+		settings::show(w, 0);
+		pump(300);
+		showme::startWhenReady();
+		pump(1800);
+		check(!showme::active() && showme::watching(), "it never starts over a window (Settings), and waits");
+		closeWindowsOver();
+		check(waitFor([&] { return showme::activeOn(w); }, 3000), "it starts once that window has gone");
+		tap(t, GDK_KEY_Escape);
+		pump(200);
+		// ---- After each of the welcome's ways out ----
+		struct Exit { int choice; const char* name; };
+		const Exit exits[] = { { -1, "Skip" }, { 2, "a blank canvas" }, { 1, "a template" }, { 3, "the shortcuts" }, { 0, "Learn Logic" } };
+		for (const Exit& x : exits) {
+			prefs().showMeAroundSeen = false;
+			prefs().hasSeenWelcome = false;
+			welcome::offer(w);
+			pump(400);
+			const bool up = welcome::window() != nullptr;
+			// A template's picker and the shortcuts' list are windows over it, each
+			// with a loop of its own until it closes: looked at from a timer, and
+			// closed from there (no pumping in it), once it's been up a while.
+			static bool s_waited = true;
+			s_waited = true;
+			if (x.choice == 1 || x.choice == 3)
+				g_timeout_add(1500, [](gpointer) -> gboolean {
+					s_waited = !showme::active();
+					GList* all = gtk_window_list_toplevels();
+					std::vector<GtkWidget*> over;
+					for (GList* l = all; l; l = l->next) {
+						GtkWidget* tw = GTK_WIDGET(l->data);
+						if (gtk_widget_get_visible(tw) && !isCircuitWindow(tw) && gtk_window_get_window_type(GTK_WINDOW(tw)) == GTK_WINDOW_TOPLEVEL)
+							over.push_back(tw);
+					}
+					g_list_free(all);
+					for (GtkWidget* tw : over) tap(tw, GDK_KEY_Escape);
+					return G_SOURCE_REMOVE;
+				}, nullptr);
+			if (x.choice < 0) tap(welcome::window(), GDK_KEY_Escape);   // Escape is Skip
+			else welcome::closeForCheck(x.choice);
+			pump(500);
+			const bool waited = s_waited;
+			closeWindowsOver();
+			const bool started = waitFor([&] { return showme::activeOn(w); }, 4000);
+			check(up && waited && started, std::string("after the welcome closes by ") + x.name + ", Show Me Around starts" +
+			                                   (x.choice == 1 || x.choice == 3 ? " (once the window it opened has gone)" : ""));
+			const int before = CircuitWindow::liveCount;
+			tap(top(), GDK_KEY_Escape);
+			pump(500);
+			if (x.choice == 0) {
+				const bool lesson = waitFor([] { return welcome::tourActive(); }, 2000);
+				check(lesson, "and the lesson (Learn Logic: Guided Tour) right after it");
+				welcome::endTourNow();
+				pump(200);
+				// The lesson's circuit of its own, closed again.
+				if (CircuitWindow::liveCount > before && circuitWindows().back() != w) {
+					gtk_window_close(circuitWindows().back()->window());
+					pump(600);
+					closeWindowsOver();
+				}
+				gtk_window_present(w->window());
+				pump(200);
+			} else {
+				check(!welcome::tourActive(), std::string("and no lesson after it (") + x.name + ")");
+			}
+		}
+		// ---- After What's New ----
+		prefs().showMeAroundSeen = false;
+		whatsnew::show(w);
+		pump(400);
+		tap(whatsnew::window(), GDK_KEY_Escape);
+		check(waitFor([&] { return showme::activeOn(w); }, 3000), "after What's New closes, it starts");
+		tap(top(), GDK_KEY_Escape);
+		pump(200);
+		// ---- Seen: the welcome closing doesn't bring it back ----
+		prefs().hasSeenWelcome = false;
+		welcome::offer(w);
+		pump(400);
+		tap(welcome::window(), GDK_KEY_Escape);
+		pump(2000);
+		check(!showme::active(), "once seen, the welcome closing doesn't start it");
+		// As it was.
+		showme::stop();
+		showme::stopWatching();
+		showme::setQuiet(true);
+		showme::setAssumeKeys(false);
+		closeWindowsOver();
+		gtk_window_present(w->window());
+		watchPaused = false;
+		pump(300);
+	}
+
 	// ---- The session -------------------------------------------------------------
 
 	int run(int actions, unsigned long long seed) {
@@ -1611,8 +2237,19 @@ struct SessionDriver {
 		// The settings file as it starts: what Settings changes later is compared with it.
 		prefs().save();
 		pump(300);
+		guarded("the canvas at the right edge", [&] { edgeChecks(); });
+		pump(200);
+		guarded("Show Me Around by the pointer", [&] { tourPointerChecks(); });
+		pump(200);
 		guarded("the Actions rail's checks", [&] { railChecks(); });
 		pump(200);
+		// Show Me Around's checks take half a minute: in seeds 1, 5, 9... only
+		// (CI's seed 1 runs, plain, fatal-criticals and frame-whole, and the
+		// sanitizers' seed 5), so the build stays inside its time.
+		if (seed % 4 == 1) {
+			guarded("Show Me Around's checks", [&] { tourChecks(); });
+			pump(200);
+		}
 		const int windowsAtStart = CircuitWindow::liveCount;
 		long rss[3] = { residentKB(), 0, 0 };
 		const double started = nowMs();

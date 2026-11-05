@@ -637,6 +637,7 @@ final class ClassroomCenter: ObservableObject {
 
     /// The class page is showing (polls at once and keeps the live connection) or not.
     func pageOpen(_ cid: String, _ open: Bool) {
+        if open { UsageStats.shared.noteClassroom() }
         guard let engine else { return }
         cl_classroom_page_open(engine, cid, open)
     }

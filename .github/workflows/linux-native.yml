@@ -36,9 +36,18 @@ jobs:
     # here starts on Ubuntu 22.04, Debian 12 (Raspberry Pi OS Bookworm),
     # Fedora 36 and anything newer.
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 55
+    env:
+      # Crash reports (linux/App/CrashReports.h): where CI builds sentry-native; CMake reads it, so
+      # the packaging scripts' own configure picks it up too. (Not a CL_ name: any CL_ variable in the
+      # environment stops usage stats from sending, which a check looks at.)
+      SENTRY_NATIVE_DIR: ${{ github.workspace }}/sentry-dist
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history: the build number is the commit count, as on the
+          # Mac and Windows (usage stats send it: docs/PRIVACY.md).
+          fetch-depth: 0
 
       - name: Install dependencies
         run: |
@@ -46,12 +55,29 @@ jobs:
           sudo apt-get install -y build-essential cmake ninja-build \
             libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev libssl-dev \
             curl python3 xvfb xauth xdotool fonts-dejavu-core fonts-liberation \
-            gnome-keyring dbus
+            gnome-keyring dbus weston unzip
+
+      - uses: ./.github/actions/sentry-native
+        with:
+          arch: ${{ matrix.arch }}
 
       - name: Build
         run: |
           cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build linux/build
+          grep -E '^CL_SENTRY_DIR' linux/build/CMakeCache.txt
+
+      # How long the intro's frames take to draw (linux/App/Splash.h, --intro-bench): every
+      # frame at 60 fps, as its window draws them, at 1280x800 and 1920x1080 at scale 1, by
+      # phase and by part. Numbers to read (the runners are shared and noisy): it never
+      # fails the build. A Raspberry Pi 4 is about 3-4 times slower than the arm64 runner.
+      - name: Intro benchmark (numbers only)
+        continue-on-error: true
+        run: |
+          mkdir -p renders bench-res
+          cp res/cl_gatedefs.xml res/FirstLaunch.wav linux/res/cedarlogic.png mac/App/LaunchIcon.png bench-res/
+          env -u DISPLAY -u WAYLAND_DISPLAY CEDARLOGIC_RESOURCES="$PWD/bench-res" timeout 600 \
+            linux/build/cedarlogic --intro-bench 1280x800 1920x1080 2>&1 | tee renders/intro-bench.txt
 
       # Signed updates (update-signing/UpdateSignature.h): the signature check on RFC 8032's
       # vectors and the ways a signature must fail; the one public key everywhere it's written
@@ -120,6 +146,53 @@ jobs:
           kill $SERVER || true
           exit $rc
 
+      # Usage stats (linux/App/UsageReport.h) against the Mac's stand-in for the site's
+      # /api/usage (mac/Tools/usage-check/server.py, told to expect platform linux): snapshot
+      # first, delta, ping, haveSnapshot false, 7 kept while it's down, 429, retries, DELETE
+      # (and later when offline), policy off, the caps, no Origin header, the 0600 file, and
+      # the leak scan of real reports (home folder, user and real name, host name, recent
+      # files, names, codes). One report of each kind goes into the renders. Nothing real is
+      # sent: the live draft was checked by hand once (--usage-live).
+      - name: Usage stats check
+        run: |
+          mkdir -p renders/privacy
+          D=$(mktemp -d)
+          python3 mac/Tools/usage-check/server.py "$D/port" &
+          SERVER=$!
+          for _ in $(seq 50); do [ -s "$D/port" ] && break; sleep 0.1; done
+          rc=0
+          XDG_CONFIG_HOME="$D/config" CL_USAGE_URL="http://127.0.0.1:$(cat "$D/port")" USAGE_SAMPLES="$PWD/renders/privacy/usage-samples.txt" \
+            timeout 180 linux/build/cedarlogic --usage-check || rc=$?
+          kill $SERVER || true
+          exit $rc
+
+      # Crash reports (linux/App/CrashReports.h): the cleaning on a made-up report full of this
+      # computer's paths and names, Sentry starting and stopping; then a real crash (CL_TEST_CRASH)
+      # of a copy run from under the home folder (so its own path has the user name in it), the
+      # report it left sent at the next launch to a stand-in for Sentry (linux/Tools/sentry-mock.py,
+      # on this computer: nothing goes to Sentry), and that report scanned: the crash is there,
+      # tagged platform=linux, with no user name, host name or home folder in it.
+      - name: Crash reports check
+        run: |
+          mkdir -p renders/privacy crash-res
+          cp res/cl_gatedefs.xml res/FirstLaunch.wav linux/res/cedarlogic.png mac/App/LaunchIcon.png crash-res/
+          D=$(mktemp -d)
+          XDG_CONFIG_HOME="$D/config" XDG_DATA_HOME="$D/data" timeout 120 linux/build/cedarlogic --crash-check
+          python3 linux/Tools/sentry-mock.py "$D/port" "$PWD/renders/privacy/crash-report.txt" &
+          SERVER=$!
+          for _ in $(seq 50); do [ -s "$D/port" ] && break; sleep 0.1; done
+          X="$HOME/cl-crash-check"
+          rm -rf "$X" && mkdir -p "$X" "$D/config/CedarLogic"
+          cp linux/build/cedarlogic "$X/cedarlogic"
+          printf '[CedarLogic]\ncrashReports=1\nprivacyAsked=true\nprivacyChoice=custom\nhasSeenWelcome=true\nshowMeAroundSeen=true\nintroAtLaunch=none\nfirstLaunchPlayed=true\nintroFirstLaunchPlayed=true\ncheckUpdates=false\n' > "$D/config/CedarLogic/native.ini"
+          export NO_AT_BRIDGE=1 XDG_CONFIG_HOME="$D/config" XDG_DATA_HOME="$D/data" CEDARLOGIC_RESOURCES="$PWD/crash-res"
+          export CL_SENTRY_DSN="http://0123456789abcdef0123456789abcdef@127.0.0.1:$(cat "$D/port")/1"
+          if CL_TEST_CRASH=1 xvfb-run -a -s "-screen 0 1280x800x24" timeout 90 "$X/cedarlogic"; then echo "::warning::the test crash didn't crash"; else echo "crashed (exit $?)"; fi
+          find "$D/data" -type f | head -20
+          xvfb-run -a -s "-screen 0 1280x800x24" timeout 25 "$X/cedarlogic" || true
+          kill $SERVER || true
+          python3 linux/Tools/sentry-mock.py --check "$PWD/renders/privacy/crash-report.txt"
+
       # Recently Deleted's files (docs/RECENTLY-DELETED.md), as the Mac's launch-selftest
       # `trash` state: the list, the 30-day sweep, Restore and Delete Now, in a library of its own.
       - name: Recently Deleted check
@@ -137,34 +210,16 @@ jobs:
         run: |
           xvfb-run -a -s "-screen 0 1600x1000x24" timeout 60 linux/build/cedarlogic --actions-check
 
-      # The intro's rules (linux/App/Intro.h), as the Mac's launch-selftest: the timeline
-      # (6.07 s, the panel held 1.1 s), which launch plays which intro, the sound (the first
-      # launch's and an update's, never an every-launch one), Settings' "Play the intro every
-      # time CedarLogic opens" (off for a new install) and Help > Play the Intro (in the
-      # actions and the menu bar). Settings of its own in a temporary folder.
+      # The intro's rules (linux/App/Intro.h), as the Mac's launch-selftest: the timelines
+      # (the full intro 6.07 s, the panel held 1.1 s; the short one 3.55 s), which launch plays
+      # which intro, the sound (the first launch's and an update's, never another launch's),
+      # Settings' "When CedarLogic opens" (Short intro for a new install; settled once from
+      # 0.3's checkbox; Full intro, Classic launch screen and None kept), Help > Play the Intro
+      # and Help > Learn Logic Online... (in the actions and the menu bar). Settings of its own
+      # in a temporary folder.
       - name: Intro check
         run: |
           xvfb-run -a -s "-screen 0 1600x1000x24" timeout 60 linux/build/cedarlogic --intro-check
-
-      # A long working session in the window (linux/App/SessionCheck.cpp): seeded
-      # random clicks, drags, keys and commands through the app's own handlers, with
-      # windows over it poked at and closed, checked all along (no crash or GTK
-      # warning, autosave, the file on disk, undo and redo, tabs and split view,
-      # memory, the window freed on close). Seeds 1-4, then again with
-      # G_DEBUG=fatal-criticals; each run capped at 7 minutes. A FAIL fails the build.
-      - name: Session check
-        if: matrix.arch == 'x86_64'
-        timeout-minutes: 30
-        run: |
-          SESSION_LOGS=session-logs linux/Tools/session-check.sh linux/build/cedarlogic 300 1 2 3 4
-
-      - name: Upload the session logs
-        if: always() && matrix.arch == 'x86_64'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: CedarLogic-Native-linux-session-logs
-          path: session-logs
-          if-no-files-found: warn
 
       # The engine through the C interface the app uses: editing, wires,
       # simulation, truth tables, and saving without changing a circuit.
@@ -265,6 +320,9 @@ jobs:
           # It installs, with its dependencies, and runs.
           sudo apt-get install -y "$PWD/$DEB"
           cedarlogic --version
+          # The shipped (stripped) binary has the crash reporter in it, and no library for it.
+          D=$(mktemp -d); XDG_CONFIG_HOME="$D/config" XDG_DATA_HOME="$D/data" cedarlogic --crash-check | tail -3
+          if ldd /usr/bin/cedarlogic | grep -i -E 'sentry|curl|unwind'; then echo '::error::the app needs a library for crash reports'; exit 1; fi
           test -f /usr/share/applications/cedarlogic.desktop
           test -f /usr/share/icons/hicolor/256x256/apps/cedarlogic.png
 
@@ -274,6 +332,16 @@ jobs:
           name: CedarLogic-Native-linux-deb-${{ matrix.arch }}
           path: debs/*.deb
           if-no-files-found: error
+
+      # The app's own file, not stripped (the .deb's and the AppImage's are): what turns a crash
+      # report's addresses into functions and lines.
+      - name: Upload symbols
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: CedarLogic-Native-linux-symbols-${{ matrix.arch }}
+          path: linux/build-release/cedarlogic
+          if-no-files-found: warn
+          retention-days: 90
 
       # Start the packaged app on a virtual display, open a circuit and take a
       # picture of the whole window: catches anything the AppImage forgot.
@@ -311,7 +379,7 @@ jobs:
           }
           again window-practice.png --light
           # The Mac's windows, as ported: one picture each.
-          for show in welcome:0 whatsnew:0 whatsnew:1 whatsnew:2 whatsnew:3 whatsnew:4 whatsnew:5 whatsnew:6 whatsnew:7 help truth feedback feedback:1 feedback:2 feedback:3 feedback:4 feedback:5 switcher templates templates:1 tour find find:1 export report scope focus split quit settings:0 settings:1 settings:2 settings:3 settings:4 settings:5 settings:6 synccode synclink syncpair:0 syncpair:1 syncpair:2 syncpair:3 syncpair:4 syncpair:5 syncconfirm toolbar:0 toolbar:2 toolbar:3 shortcuts quickadd lock about gatesettings rename ram menu menu:1 menu:2 menu:3 menu:4 primary predict:0 predict:1 stepclock:0 stepclock:1 lockinplace:0 lockinplace:1 pagelinks draw:0 draw:1 draw:2 projector:0 projector:1; do
+          for show in welcome:0 whatsnew:0 whatsnew:1 whatsnew:2 whatsnew:3 whatsnew:4 whatsnew:5 whatsnew:6 whatsnew:7 help truth feedback feedback:1 feedback:2 feedback:3 feedback:4 feedback:5 switcher templates templates:1 tour find find:1 export report scope focus split quit settings:0 settings:1 settings:2 settings:3 settings:4 settings:5 settings:6 settings:7 welcome:5 privacy privacy:1 whatssent synccode synclink syncpair:0 syncpair:1 syncpair:2 syncpair:3 syncpair:4 syncpair:5 syncconfirm toolbar:0 toolbar:2 toolbar:3 shortcuts quickadd lock about gatesettings rename ram menu menu:1 menu:2 menu:3 menu:4 primary predict:0 predict:1 stepclock:0 stepclock:1 lockinplace:0 lockinplace:1 pagelinks draw:0 draw:1 draw:2 projector:0 projector:1; do
             name=$(echo "$show" | tr ':' '-')
             xvfb-run -a -s "-screen 0 1600x1000x24" \
               timeout 60 "$APPIMAGE" --show "$show" --screenshot "renders/show-$name.png" res/samples/practice.cdl || echo "no $show"
@@ -321,9 +389,8 @@ jobs:
           # settings (a folder of its own, so none of these changes the next): open with a
           # label (rail-0), folded (1), the tab peeking at the window's edge (2), slid out
           # over the canvas as on hover (3), mid-drag (4), focus mode's quiet tab (5), slid
-          # out there (6), a narrow window (7), Simulation View (8), in the toolbar instead
-          # (9), focus mode peeking (10); the Customize window, and searched for "export";
-          # Settings > Actions.
+          # out there (6), a narrow window (7), Simulation View (8), turned off (9), focus
+          # mode peeking (10); the Customize window, and searched for "export"; Settings > Actions.
           mkdir -p renders/rail
           for look in light dark; do
             for show in rail:0 rail:1 rail:2 rail:3 rail:4 rail:5 rail:6 rail:7 rail:8 rail:9 rail:10 customize:0 customize:1 settings:4; do
@@ -335,6 +402,24 @@ jobs:
             done
           done
           ls renders/rail
+          # Show Me Around (linux/App/ShowMeAround.h), on aarch64 only (x86_64 has the session
+          # check to fit in its time; the pictures are the same), light and dark, from a new install's
+          # settings: each of its seven stops (walk:N), the first with the Actions panel off
+          # (walkoff:0, six stops), each in a 1024x600 window (walksmall:N); and the welcome's
+          # Actions panel page (welcome:2), What's New's card for it (whatsnewpanel),
+          # Settings > Actions on and off, and About.
+          mkdir -p renders/tour
+          [ "$(uname -m)" = x86_64 ] && looks= || looks="light dark"
+          for look in $looks; do
+            for show in walk:0 walk:1 walk:2 walk:3 walk:4 walk:5 walk:6 walkoff:0 walksmall:0 walksmall:1 walksmall:2 walksmall:3 walksmall:4 walksmall:5 walksmall:6 welcome:2 whatsnewpanel whatsnew:4 whatsnew:7 settings:4 settingsoff about; do
+              name=$(echo "$show" | tr ':' '-')
+              home=$(mktemp -d)
+              XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" xvfb-run -a -s "-screen 0 1600x1000x24" \
+                timeout 60 "$APPIMAGE" --$look --show "$show" --screenshot "renders/tour/$name-$look.png" res/samples/practice.cdl || echo "no $show $look"
+              rm -rf "$home"
+            done
+          done
+          ls renders/tour
           # Send Feedback's recording (linux/App/Capture.h): with no ffmpeg an animated PNG,
           # with ffmpeg an MP4 made from the app's own movie; each checked by the app, then
           # read back by ffprobe. The files go with the renders.
@@ -454,31 +539,58 @@ jobs:
             cp "intro-frames/frame-${f%%:*}.png" "renders/intro/intro-${f#*:}.png"
           done
           rm -rf intro-frames
+          # The short intro (every ordinary launch's, unless Settings says otherwise): 3.55 s, 213
+          # frames after the first, no panel, its bloom crossfading straight into the window; the
+          # LED lit, the beat, the bloom and the crossfade kept.
+          env -u DISPLAY -u WAYLAND_DISPLAY timeout 600 "$APPIMAGE" --render-intro intro-frames short $behind
+          test "$(ls intro-frames/frame-*.png | wc -l)" -eq 214
+          for f in 0156:2.60s 0180:3.00s 0186:3.10s 0192:3.20s 0204:3.40s 0213:3.55s; do
+            cp "intro-frames/frame-${f%%:*}.png" "renders/intro/short-${f#*:}.png"
+          done
+          rm -rf intro-frames
           # And live (CI never plays it by itself): on a virtual display, GTK's warnings
           # fatal, with settings of its own that have seen the welcome and What's New.
           #   play, skip: as at the first launch after the update (CL_INTRO=update), with the
           #     sound; its window up, then gone into the circuit window, the intro marked
           #     played; then again, skipped with a click.
-          #   every: nothing owed, "Play the intro every time CedarLogic opens" on: it plays,
-          #     silently, and the once-only keys are left as they were.
-          #   menu: nothing owed and the setting off: no intro; then Help > Play the Intro
-          #     (Alt+H, I) plays the first launch's over the circuit window, with the sound,
-          #     and goes, the window still there, nothing marked played.
-          for how in play skip every menu; do
+          #   short: nothing owed and nothing chosen ("When CedarLogic opens" is Short intro
+          #     to begin with, settled from 0.3's checkbox): the short intro, silently.
+          #   every: nothing owed, "When CedarLogic opens: Full intro": the full one, silently,
+          #     and the once-only keys are left as they were.
+          #   menu: nothing owed, "Classic launch screen": no intro (the launch screen alone);
+          #     then Help > Play the Intro (Alt+H, I) plays the first launch's over the circuit
+          #     window, with the sound, and goes, the window still there, nothing marked played.
+          #   none: nothing owed, "None": no launch screen at all, straight into the window.
+          for how in play skip short every menu none; do
             home=$(mktemp -d)
             mkdir -p "$home/config/CedarLogic"
             ini="$home/config/CedarLogic/native.ini"
-            printf '[CedarLogic]\nhasSeenWelcome=true\nseenWhatsNew=0.4\nlastSeenVersion=0.4\ncheckUpdates=false\n' > "$ini"
+            # (Show Me Around seen and the privacy question answered too: these launches are about
+            # the intro, and either would come up over the window and take the keys meant for its menu.)
+            printf '[CedarLogic]\nhasSeenWelcome=true\nseenWhatsNew=0.4\nlastSeenVersion=0.4\ncheckUpdates=false\nshowMeAroundSeen=true\nprivacyAsked=true\nprivacyChoice=no\n' > "$ini"
             forced=update
             case $how in
-              every) forced=; printf 'introUpdatePlayed=0.4\nintroEveryLaunch=true\n' >> "$ini" ;;
-              menu) forced=; printf 'introUpdatePlayed=0.4\n' >> "$ini" ;;
+              short) forced=; printf 'introUpdatePlayed=0.4\nintroEveryLaunch=true\n' >> "$ini" ;;
+              every) forced=; printf 'introUpdatePlayed=0.4\nintroAtLaunch=full\n' >> "$ini" ;;
+              menu) forced=; printf 'introUpdatePlayed=0.4\nintroAtLaunch=classic\n' >> "$ini" ;;
+              none) forced=; printf 'introUpdatePlayed=0.4\nintroAtLaunch=none\n' >> "$ini" ;;
             esac
             HOW=$how xvfb-run -a -s "-screen 0 1600x1000x24" env -u CI ${forced:+CL_INTRO=$forced} CL_INTRO_LOG=1 G_DEBUG=fatal-criticals \
               XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" bash -c '
               up() { xdotool search --onlyvisible --name "$1" > /dev/null 2>&1; }
               "$APPIMAGE" > "renders/intro-live-$HOW.log" 2>&1 &
               app=$!
+              if [ "$HOW" = none ]; then
+                # Straight in: the circuit window, and never a launch screen.
+                for i in $(seq 80); do up " — CedarLogic\$" && break; up "^CedarLogic\$" && break; sleep 0.1; done
+                up "^CedarLogic\$" && { echo "a launch screen came up with None ($HOW)"; kill $app; exit 1; }
+                up " — CedarLogic\$" || { echo "no circuit window ($HOW)"; kill $app; exit 1; }
+                sleep 1
+                up "^CedarLogic\$" && { echo "a launch screen came up with None ($HOW)"; kill $app; exit 1; }
+                kill $app
+                wait $app 2> /dev/null
+                exit 0
+              fi
               if [ "$HOW" = menu ]; then
                 # The launch screen, then the circuit window, and no intro.
                 for i in $(seq 80); do up " — CedarLogic\$" && break; sleep 0.25; done
@@ -494,7 +606,9 @@ jobs:
               fi
               for i in $(seq 80); do up "^CedarLogic\$" && break; sleep 0.25; done
               up "^CedarLogic\$" || { echo "no intro window ($HOW)"; kill $app; exit 1; }
-              tries=60
+              # (Its own clock slows it where frames come slowly, as they may on a
+              # virtual display: up to 30 s.)
+              tries=120
               if [ "$HOW" = skip ]; then sleep 1; xdotool mousemove 800 500 click 1; tries=12; fi
               for i in $(seq $tries); do up "^CedarLogic\$" || break; sleep 0.25; done
               up "^CedarLogic\$" && { echo "the intro window is still up ($HOW)"; kill $app; exit 1; }
@@ -509,7 +623,10 @@ jobs:
             cat "$log"
             case $how in
               play|skip) grep -q "^introUpdatePlayed=0.4" "$ini"; grep -q "intro: update, with the sound" "$log" ;;
-              every) grep -q "intro: every, silent" "$log"; grep -q "^introEveryLaunch=true" "$ini" ;;
+              short) grep -q "intro: short, silent" "$log"; grep -q "^introAtLaunch=short" "$ini" ;;
+              every) grep -q "intro: every, silent" "$log"; grep -q "^introAtLaunch=full" "$ini" ;;
+              none) grep -q "intro: straight in: no launch screen" "$log"
+                    if grep -q "intro: [a-z]*, " "$log"; then echo "an intro played with None"; exit 1; fi ;;
               menu) grep -q "intro: first, from the menu, with the sound" "$log" ;;
             esac
             if grep -q "^introFirstLaunchPlayed=true" "$ini"; then echo "the first launch's intro was marked played ($how)"; exit 1; fi
@@ -569,6 +686,260 @@ jobs:
           name: CedarLogic-Native-linux-renders-${{ matrix.arch }}
           path: renders
           if-no-files-found: warn
+  # The windows' checks, beside the build (each job builds the app again: two
+  # minutes, quicker than waiting for it): Settings and Customize Actions on
+  # small screens, X11 and Wayland, and every menu's text.
+  settings:
+    name: Settings and menus (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64,  os: ubuntu-22.04 }
+          - { arch: aarch64, os: ubuntu-22.04-arm }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build \
+            libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev libssl-dev \
+            curl python3 xvfb xauth xdotool fonts-dejavu-core fonts-liberation \
+            gnome-keyring dbus weston unzip
+
+      # (As the build job: Settings > Privacy and the consent are pictured and checked with the
+      # crash reporter in the build.)
+      - uses: ./.github/actions/sentry-native
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Build
+        env:
+          SENTRY_NATIVE_DIR: ${{ github.workspace }}/sentry-dist
+        run: |
+          cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCL_BUILD_TOOLS=OFF
+          cmake --build linux/build
+
+      # Settings on small screens (linux/App/SettingsCheck.cpp): every page and Customize
+      # Actions on the Raspberry Pi touchscreen's 800x480, 1024x600 and 1280x720, in a light and
+      # a dark GTK theme forced on the app (GTK_THEME, so it can't swap it for its own: the
+      # worst case), with the app light and dark; on x86_64 also the Pi's PiXflat and PiXnoir in
+      # its PibotoLt font, and Ubuntu's Yaru-dark. Each window fits the screen (with room for a
+      # panel the desktop doesn't report), every page is the same width, its text reads at
+      # 4.5:1 or better, and the mouse wheel over a dropdown, number box, slider or switch
+      # scrolls the page instead of changing the setting. The whole screen is pictured each
+      # time, into renders/settings (uploaded straight away, as its own artifact).
+      - name: Settings check
+        run: |
+          mkdir -p renders/settings
+          pi=
+          if [ "$(uname -m)" = x86_64 ] &&
+             curl -fsSL -o /tmp/piboto.deb https://archive.raspberrypi.org/debian/pool/main/f/fonts-piboto/fonts-piboto_1.2_all.deb &&
+             curl -fsSL -o /tmp/pixflat.deb https://archive.raspberrypi.org/debian/pool/main/p/pixflat-theme/pixflat-theme_0.24_amd64.deb &&
+             echo "ae9418e029e654e2fbe9ce33768ea5985fa91441d1f8ac2cf7e015f0f2539fad  /tmp/piboto.deb" | sha256sum -c - &&
+             echo "56e518b2321a1784b39566885df595661b99781b26e439dd09a6ba1d56858c66  /tmp/pixflat.deb" | sha256sum -c -; then
+            sudo dpkg-deb -x /tmp/piboto.deb / && sudo dpkg-deb -x /tmp/pixflat.deb / && fc-cache -f > /dev/null && pi=1
+          fi
+          yaru=
+          [ "$(uname -m)" = x86_64 ] && sudo apt-get install -y -qq yaru-theme-gtk > /dev/null 2>&1 && yaru=1
+          fails=0
+          # run <WxH> <GTK_THEME> <font or -> <light|dark>
+          run() {
+            local size=$1 theme=$2 font=$3 look=$4
+            local tag="$size-$(echo "$theme" | tr ':' '-')-app-$look"
+            local home
+            home=$(mktemp -d)
+            mkdir -p "$home/config/gtk-3.0"
+            [ "$font" = - ] || printf '[Settings]\ngtk-font-name=%s\n' "$font" > "$home/config/gtk-3.0/settings.ini"
+            if ! XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" GTK_THEME="$theme" \
+                 xvfb-run -a -s "-screen 0 ${size}x24" timeout 120 linux/build/cedarlogic --$look \
+                 --settings-check renders/settings "$tag" res/samples/practice.cdl > "renders/settings/$tag.log" 2>&1; then
+              fails=$((fails + 1))
+              echo "::error::Settings check failed: $tag"
+            fi
+            grep -E "^(FAIL|  )|settings-check:" "renders/settings/$tag.log" || true
+            rm -rf "$home"
+          }
+          if [ "$(uname -m)" = x86_64 ]; then
+            for size in 800x480 1024x600 1280x720; do
+              for theme in Adwaita Adwaita:dark; do
+                for look in light dark; do run $size $theme - $look; done
+              done
+              if [ -n "$pi" ]; then for look in light dark; do run $size PiXflat "PibotoLt 12" $look; done; fi
+            done
+            if [ -n "$pi" ]; then for look in light dark; do run 1024x600 PiXnoir "PibotoLt 12" $look; done; fi
+            if [ -n "$yaru" ]; then for look in light dark; do run 1024x600 Yaru-dark - $look; done; fi
+          else
+            for theme in Adwaita Adwaita:dark; do
+              for look in light dark; do run 800x480 $theme - $look; done
+            done
+          fi
+          # Under Wayland too (Raspberry Pi OS Bookworm's desktop is Wayland, where the desktop,
+          # not the app, places windows): weston with no screen, at each size. A window's place
+          # can't be read there, so the check is that all of it (its own title bar, and room for
+          # one the desktop may draw and for a panel it doesn't report) fits the screen.
+          if command -v weston > /dev/null; then
+            for size in 800x480 1024x600 1280x720; do
+              rt=$(mktemp -d); chmod 700 "$rt"
+              XDG_RUNTIME_DIR=$rt weston --backend=headless-backend.so --width=${size%x*} --height=${size#*x} \
+                --socket=wayland-cl --idle-time=0 > "renders/settings/weston-$size.log" 2>&1 &
+              wpid=$!
+              for i in $(seq 50); do [ -S "$rt/wayland-cl" ] && break; sleep 0.2; done
+              for look in light dark; do
+                tag="$size-wayland-app-$look"
+                home=$(mktemp -d)
+                if ! XDG_RUNTIME_DIR=$rt WAYLAND_DISPLAY=wayland-cl GDK_BACKEND=wayland XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" \
+                     env -u DISPLAY timeout 120 linux/build/cedarlogic --$look --settings-check renders/settings "$tag" res/samples/practice.cdl \
+                     > "renders/settings/$tag.log" 2>&1; then
+                  fails=$((fails + 1))
+                  echo "::error::Settings check failed: $tag"
+                fi
+                grep -E "^(FAIL|  )|settings-check:" "renders/settings/$tag.log" || true
+                rm -rf "$home"
+              done
+              kill $wpid 2> /dev/null; wait $wpid 2> /dev/null
+              rm -rf "$rt"
+            done
+          else
+            echo "::warning::no weston here: the Wayland Settings check didn't run"
+          fi
+          ls renders/settings | head -400
+          [ "$fails" = 0 ] || { echo "::error::$fails Settings check run(s) failed"; exit 1; }
+
+      # Every menu's text, read off the screen as GTK draws it (linux/App/SettingsCheck.cpp's
+      # menuCheck), as it is and lit with the pointer on it: the menu bar's titles, each menu
+      # and its submenus, the canvas's and a part's right-click menus, a menu of every kind of
+      # row, a dropdown's list and a menu as a popover, at 4.5:1 or better; in the same themes
+      # as the Settings check (forced on the app with GTK_THEME), with the app light and dark.
+      # Pictures of the open menus go with the Settings pictures.
+      - name: Menu check
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p renders/settings
+          fails=0
+          menus() {
+            local theme=$1 font=$2 look=$3
+            local tag="menus-$(echo "$theme" | tr ':' '-')-app-$look"
+            local home
+            home=$(mktemp -d)
+            mkdir -p "$home/config/gtk-3.0"
+            [ "$font" = - ] || printf '[Settings]\ngtk-font-name=%s\n' "$font" > "$home/config/gtk-3.0/settings.ini"
+            if ! XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" GTK_THEME="$theme" \
+                 xvfb-run -a -s "-screen 0 1280x720x24" timeout 180 linux/build/cedarlogic --$look \
+                 --menu-check renders/settings "$tag" res/samples/practice.cdl > "renders/settings/$tag.log" 2>&1; then
+              fails=$((fails + 1))
+              echo "::error::Menu check failed: $tag"
+            fi
+            grep -E "^(FAIL|  )|menu-check:" "renders/settings/$tag.log" || true
+            rm -rf "$home"
+          }
+          for theme in Adwaita Adwaita:dark; do for look in light dark; do menus $theme - $look; done; done
+          if [ -d /usr/share/themes/PiXflat ]; then
+            for theme in PiXflat PiXnoir; do for look in light dark; do menus $theme "PibotoLt 12" $look; done; done
+          fi
+          if [ -d /usr/share/themes/Yaru-dark ]; then for look in light dark; do menus Yaru-dark - $look; done; fi
+          [ "$fails" = 0 ] || { echo "::error::$fails Menu check run(s) failed"; exit 1; }
+
+      # Crash reports' and usage stats' one consent (linux/App/PrivacyCheck.h) in real windows,
+      # clicked with the real pointer (xdotool): the Mac's consent sheet crashed on a real
+      # window, so this is never only a picture. The welcome's "A small favour" (No thanks),
+      # the updaters' sheet after What's New and before Show Me Around (Yes), Escape, Choose
+      # what to send and its switches, See exactly what's sent, asked once, each answer saved
+      # in native.ini; on a big screen and on the Raspberry Pi touchscreen's 800x480 (where
+      # they scroll). Then a lab's /etc/cedarlogic/policy.ini (a stand-in, CL_POLICY_FILE)
+      # turning both off: nobody asked, nothing counted, Settings > Privacy greyed out.
+      - name: Privacy consent check
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p renders/settings
+          fails=0
+          consent() {
+            local tag=$1 size=$2; shift 2
+            local home
+            home=$(mktemp -d)
+            if ! env NO_AT_BRIDGE=1 XDG_CONFIG_HOME="$home/config" XDG_DATA_HOME="$home/data" "$@" \
+                 xvfb-run -a -s "-screen 0 ${size}x24" timeout 180 linux/build/cedarlogic --privacy-check res/samples/practice.cdl \
+                 > "renders/settings/privacy-$tag.log" 2>&1; then
+              fails=$((fails + 1))
+              echo "::error::Privacy consent check failed: $tag"
+            fi
+            grep -E "^(PASS|FAIL|privacy|     )" "renders/settings/privacy-$tag.log" || tail -20 "renders/settings/privacy-$tag.log"
+            if grep -E "(CRITICAL|WARNING) \*\*" "renders/settings/privacy-$tag.log"; then echo "::warning::GTK warnings in the privacy check ($tag)"; fi
+            rm -rf "$home"
+          }
+          consent 1600x1000 1600x1000
+          consent 800x480 800x480
+          P=$(mktemp -d)
+          printf '# A lab'"'"'s policy (the stand-in for /etc/cedarlogic/policy.ini)\n[Policy]\nDisableCrashReporting=true\nDisableUsageStats=true\n' > "$P/policy.ini"
+          consent policy 1600x1000 CL_POLICY_FILE="$P/policy.ini" CL_EXPECT_POLICY=1
+          [ "$fails" = 0 ] || { echo "::error::$fails privacy consent check run(s) failed"; exit 1; }
+
+      - name: Upload the Settings pictures
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: CedarLogic-Native-linux-settings-${{ matrix.arch }}
+          path: renders/settings
+          if-no-files-found: warn
+
+  # The working session in the window, beside the build too.
+  session:
+    name: session check (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64,  os: ubuntu-22.04 }
+          - { arch: aarch64, os: ubuntu-22.04-arm }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build \
+            libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev libssl-dev \
+            curl python3 xvfb xauth xdotool fonts-dejavu-core fonts-liberation \
+            gnome-keyring dbus weston
+
+      - name: Build
+        run: |
+          cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCL_BUILD_TOOLS=OFF
+          cmake --build linux/build
+
+      # A long working session in the window (linux/App/SessionCheck.cpp): seeded
+      # random clicks, drags, keys and commands through the app's own handlers, with
+      # windows over it poked at and closed, checked all along (no crash or GTK
+      # warning, autosave, the file on disk, undo and redo, tabs and split view,
+      # memory, the window freed on close). Seeds 1-4, then again with
+      # G_DEBUG=fatal-criticals; each run capped at 7 minutes. A FAIL fails the build.
+      - name: Session check
+        if: matrix.arch == 'x86_64'
+        timeout-minutes: 35
+        run: |
+          SESSION_LOGS=session-logs linux/Tools/session-check.sh linux/build/cedarlogic 300 1 2 3 4
+
+      # On the other CPU, a short session: the checks it starts with (the canvas at the
+      # window's right edge with the real pointer, the Actions panel) and a few actions.
+      - name: Session check, short
+        if: matrix.arch != 'x86_64'
+        timeout-minutes: 15
+        run: |
+          SESSION_LOGS=session-logs linux/Tools/session-check.sh linux/build/cedarlogic 20 2
+
+      - name: Upload the session logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: CedarLogic-Native-linux-session-logs${{ matrix.arch != 'x86_64' && format('-{0}', matrix.arch) || '' }}
+          path: session-logs
+          if-no-files-found: warn
+
 
   # The same session with AddressSanitizer and UndefinedBehaviorSanitizer in the
   # app and the engine: memory used after it's freed, or read past its end, is
@@ -577,7 +948,7 @@ jobs:
   session-sanitizers:
     name: session check with sanitizers (x86_64)
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
@@ -585,7 +956,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build \
             libgtk-3-dev libcairo2-dev libfontconfig1-dev libfreetype-dev libssl-dev \
-            xvfb xauth fonts-dejavu-core fonts-liberation
+            xvfb xauth xdotool fonts-dejavu-core fonts-liberation
       - name: Build with sanitizers
         run: |
           cmake -S linux -B linux/build-asan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCL_BUILD_TOOLS=OFF \
@@ -719,7 +1090,7 @@ jobs:
   # pre-release, replaced on every push to linux/native. Its own job, after
   # both builds, so the release only ever holds a matching pair.
   publish:
-    needs: build
+    needs: [build, settings, session]
     if: github.ref == 'refs/heads/linux/native'
     runs-on: ubuntu-latest
     permissions:

@@ -6,6 +6,8 @@
 #define CL_WINDOWS_WELCOME_H
 
 #include "App.h"
+#include "Intro.h"
+#include "ShowMeAround.h"
 #include <functional>
 #include <string>
 
@@ -16,6 +18,10 @@ namespace splash {
 // launch's work is done (hideSoon), then dissolves into the windows.
 void show();
 bool active();
+// "When CedarLogic opens: None" (intro::straightIn): no launch screen this
+// launch, and its windows open without their card, until it's done
+// (hideSoon).
+bool straightIn();
 void setStatus(const char* status);
 // The circuit being opened, for its "Opening ..." line.
 void setOpening(const std::string& name);
@@ -35,7 +41,7 @@ void skipIntro();
 // `over` (already on screen), dissolving back into it; nothing is held and
 // the once-only keys are left as they are. Not while the launch screen or
 // an intro is up (canPlayIntroNow).
-void playIntroNow(CircuitWindow* over);
+void playIntroNow(CircuitWindow* over, intro::Trigger trigger = intro::Trigger::First);
 bool canPlayIntroNow();
 void drawAfterIntro(ID2D1RenderTarget* rt, D2D1_POINT_2F panelAt, double t);
 void releaseIntroPicture();
@@ -49,12 +55,19 @@ bool offer(CircuitWindow* window);
 bool show(CircuitWindow* window);
 // The guided tour, on this circuit's window.
 void startTour(CircuitWindow* window);
-// Help > Guided Tour: the tour on a circuit of its own (this one if it's
+// Help > Learn Logic: Guided Tour: the tour on a circuit of its own (this one if it's
 // new and empty, else a new one).
 void startTourOn(CircuitWindow* window);
 // For --screenshot: the welcome on a page, and the tour's card.
 bool pageForScreenshot(int page);
 HWND tourWindow();
+// The welcome is up (Show Me Around waits for it to close).
+bool isOpen();
+// The lesson put away (Show Me Around starting).
+void stopTour();
+// --rail-check: the welcome closed the way `exit` says (without opening
+// what that way opens next, a template's sheet or the shortcut list).
+void finishForTest(showme::WelcomeExit exit);
 }  // namespace welcome
 
 // What's New: after an update, a walk through what's new since the old
@@ -66,12 +79,22 @@ extern const char* const kVersion;
 // If it hasn't been shown for this version. False when it wasn't shown.
 bool offer(CircuitWindow* window);
 void show(CircuitWindow* window, int page = 0);
+bool isOpen();
+// For --screenshot: the Actions panel's card ("Show or Hide It...") open over the page.
+void showPanelCard();
+void closeForTest();
 }  // namespace whatsnew
 
-// Help > About: a card in the brand's look with the version, and Website and
-// What's New.
+// Help > About: a card in the brand's look with the version, "Questions?"
+// with the project's address (a mailto link), and Website and What's New.
 namespace about {
 void show(CircuitWindow* window);
+// "Questions? cedarlogic@proton.me": the link's target, and (for
+// --rail-check) whether it has been drawn; About up, and put away.
+std::string mailLink();
+bool mailLinkDrawn();
+bool isOpen();
+void closeNow();
 }  // namespace about
 
 #endif  // CL_WINDOWS_WELCOME_H

@@ -47,7 +47,11 @@ const std::vector<Page>& pages() {
 		    p("The window has three parts: the **side panel** of gates down the left (with a small map of the page under it), the "
 		      "**canvas** where you build, and the **toolbar** across the top. Each circuit can have several **tabs** (pages), shown "
 		      "above the canvas. The menu bar over it has every command: File, Edit, View, Simulation, Window and Help (F10 or Alt and a letter opens them)."),
-		    tip("New here? Help ▸ Guided Tour shows you around, one part at a time.") },
+		    p("Down the right edge is the **Actions panel**: the commands you use most, a click each. Rest on one for its name and shortcut, "
+		      "click its left edge to fold it away, and right-click it to choose what's on it. Settings ▸ Actions turns it off or on."),
+		    tip("New here? Help ▸ Show Me Around points out where everything is in the window, in under a minute. Help ▸ Learn Logic: "
+		        "Guided Tour is a lesson: it builds a working AND circuit with you, a step at a time, in about five."),
+		    p("More lessons with live circuits: Help ▸ **Learn Logic Online…** opens them on the CedarLogic website (cedarlogic.netlify.app/learn) in your browser.") },
 		  true },
 		{ "first", "Your First Circuit", "dialog-information-symbolic", "Two switches, an AND gate and a light.",
 		  { h("1. Two switches"),
@@ -297,7 +301,7 @@ float rich(cairo_t* cr, const std::string& text, float x, float y, float width, 
 // ---- The window ----------------------------------------------------------------------
 
 const float kSide = 250, kRow = 30, kSearchH = 30;
-enum Extra { kShortcuts = 1000, kClassic, kWhatsNew, kTour };
+enum Extra { kShortcuts = 1000, kClassic, kWhatsNew, kTour, kShowMe };
 
 struct Row { int page = -1; int extra = 0; std::string heading; RectF r{}; };
 
@@ -331,7 +335,8 @@ struct HelpWindow {
 		if (q.empty()) {
 			rows.push_back(Row{ -1, 0, "MORE" });
 			rows.push_back(Row{ -1, kShortcuts, "Keyboard Shortcuts" });
-			rows.push_back(Row{ -1, kTour, "Guided Tour" });
+			rows.push_back(Row{ -1, kShowMe, "Show Me Around" });
+			rows.push_back(Row{ -1, kTour, "Learn Logic: Guided Tour" });
 			rows.push_back(Row{ -1, kWhatsNew, "What's New" });
 			rows.push_back(Row{ -1, kClassic, "Classic Help" });
 		} else if (rows.empty()) {
@@ -353,6 +358,7 @@ struct HelpWindow {
 		if (!alive) from = circuitWindows().empty() ? nullptr : circuitWindows().front();
 		switch (r.extra) {
 		case kShortcuts: if (from) from->showShortcuts(); break;
+		case kShowMe: if (from) { gtk_window_present(from->window()); from->runAction("win.show-me-around"); } break;
 		case kTour: if (from) { gtk_window_present(from->window()); from->runAction("app.guided-tour"); } break;
 		case kWhatsNew: if (from) { gtk_window_present(from->window()); from->runAction("win.whats-new"); } break;
 		case kClassic: {

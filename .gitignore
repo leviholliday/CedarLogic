@@ -47,3 +47,5 @@ mac/build/
 
 # Release-day scripts: downloads and state (scripts/release-day.sh)
 .release-work/
+# Intro previews (mac/Tools/render-intro.sh)
+mac/Tools/intro-preview/

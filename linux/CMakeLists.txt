@@ -77,7 +77,33 @@ if(CL_BUILD_APP)
 	if(NOT CL_GIT_RC EQUAL 0 OR CL_GIT_COMMIT STREQUAL "")
 		set(CL_GIT_COMMIT "unknown")
 	endif()
-	target_compile_definitions(CedarLogic PRIVATE CL_VERSION="${PROJECT_VERSION}" CL_GIT_COMMIT="${CL_GIT_COMMIT}" CL_BUILD_TIME=${CL_BUILD_TIME}LL)
+	# The build number, as the Mac's (mac/build.sh) and Windows': the commit
+	# count. Usage stats send it (docs/PRIVACY.md); CI checks out the whole
+	# history for it (a shallow copy counts 1).
+	execute_process(COMMAND git -C "${ROOT}" rev-list --count HEAD
+	                OUTPUT_VARIABLE CL_BUILD_NUMBER OUTPUT_STRIP_TRAILING_WHITESPACE
+	                RESULT_VARIABLE CL_BUILD_NUMBER_RC ERROR_QUIET)
+	if(NOT CL_BUILD_NUMBER_RC EQUAL 0 OR NOT CL_BUILD_NUMBER MATCHES "^[0-9]+$")
+		set(CL_BUILD_NUMBER 0)
+	endif()
+	target_compile_definitions(CedarLogic PRIVATE CL_VERSION="${PROJECT_VERSION}" CL_GIT_COMMIT="${CL_GIT_COMMIT}" CL_BUILD_TIME=${CL_BUILD_TIME}LL
+	                           CL_BUILD_NUMBER=${CL_BUILD_NUMBER})
+	# Crash reports (App/CrashReports.h): sentry-native, built by CI into a folder of its own
+	# (CL_SENTRY_DIR, its install prefix; .github/workflows/linux-native.yml; the environment's
+	# SENTRY_NATIVE_DIR also counts, so the packaging scripts pick it up), static, never kept in git.
+	# Without it the app builds the same, with crash reports "not in this build". The address is
+	# the Mac's (mac/build.sh SENTRY_DSN): one Sentry project for every platform.
+	set(CL_SENTRY_DIR "$ENV{SENTRY_NATIVE_DIR}" CACHE PATH "sentry-native's install prefix (crash reports); empty: none")
+	set(CL_SENTRY_DSN "https://36b411e83b623ea3bc3a7bc6fda107a0@o4512167663239168.ingest.us.sentry.io/4512167685849088"
+	    CACHE STRING "Where crash reports go")
+	if(CL_SENTRY_DIR)
+		find_package(sentry CONFIG REQUIRED PATHS "${CL_SENTRY_DIR}" NO_DEFAULT_PATH)
+		target_link_libraries(CedarLogic PRIVATE sentry::sentry)
+		target_compile_definitions(CedarLogic PRIVATE CL_SENTRY=1 CL_SENTRY_DSN="${CL_SENTRY_DSN}")
+		# Line numbers for the symbols CI keeps (the .deb and AppImage are stripped).
+		target_compile_options(CedarLogic PRIVATE -g1)
+		message(STATUS "Crash reports: sentry-native from ${CL_SENTRY_DIR}")
+	endif()
 	# Updates are signed (update-signing/UpdateSignature.h).
 	target_link_libraries(CedarLogic PRIVATE cl_updatesig)
 	set(CL_FEEDBACK_URL "https://cedarlogic.netlify.app" CACHE STRING "Where Send Feedback sends to")
