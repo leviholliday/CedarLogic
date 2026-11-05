@@ -1758,9 +1758,15 @@ struct SessionDriver {
 					ok = dock && onScreen(dock, 3, ty, rx, ry) && xdo({ "mousemove", "--sync", rx, ry, "click", "1" });
 					what = "a click on the folded tab opens the panel";
 				} else {
+					// (Away first, and long enough for anything out to go back; then
+					// onto the tab and left there. Again if the display was slow to say so.)
+					away();
+					pump(800);
 					r->clearTrace();
-					ok = dock && pointerTo(dock, 3, ty);
-					pump(600);
+					for (int tries = 0; tries < 3 && dock && !r->slidOut(); tries++) {
+						ok = pointerTo(dock, 2 + tries, ty + tries * 20);
+						pump(600);
+					}
 					ok = ok && r->slidOut();
 					GtkWidget* f = r->floaterWidget();
 					ok = ok && f && onScreen(f, 2, ty, rx, ry) && xdo({ "mousemove", "--sync", rx, ry, "click", "1" });
