@@ -39,8 +39,9 @@ jobs:
     timeout-minutes: 55
     env:
       # Crash reports (linux/App/CrashReports.h): where CI builds sentry-native; CMake reads it, so
-      # the packaging scripts' own configure picks it up too.
-      CL_SENTRY_DIR: ${{ github.workspace }}/sentry-dist
+      # the packaging scripts' own configure picks it up too. (Not a CL_ name: any CL_ variable in the
+      # environment stops usage stats from sending, which a check looks at.)
+      SENTRY_NATIVE_DIR: ${{ github.workspace }}/sentry-dist
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -717,7 +718,7 @@ jobs:
 
       - name: Build
         env:
-          CL_SENTRY_DIR: ${{ github.workspace }}/sentry-dist
+          SENTRY_NATIVE_DIR: ${{ github.workspace }}/sentry-dist
         run: |
           cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCL_BUILD_TOOLS=OFF
           cmake --build linux/build

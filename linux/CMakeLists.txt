@@ -90,10 +90,10 @@ if(CL_BUILD_APP)
 	                           CL_BUILD_NUMBER=${CL_BUILD_NUMBER})
 	# Crash reports (App/CrashReports.h): sentry-native, built by CI into a folder of its own
 	# (CL_SENTRY_DIR, its install prefix; .github/workflows/linux-native.yml; the environment's
-	# CL_SENTRY_DIR also counts, so the packaging scripts pick it up), static, never kept in git.
+	# SENTRY_NATIVE_DIR also counts, so the packaging scripts pick it up), static, never kept in git.
 	# Without it the app builds the same, with crash reports "not in this build". The address is
 	# the Mac's (mac/build.sh SENTRY_DSN): one Sentry project for every platform.
-	set(CL_SENTRY_DIR "$ENV{CL_SENTRY_DIR}" CACHE PATH "sentry-native's install prefix (crash reports); empty: none")
+	set(CL_SENTRY_DIR "$ENV{SENTRY_NATIVE_DIR}" CACHE PATH "sentry-native's install prefix (crash reports); empty: none")
 	set(CL_SENTRY_DSN "https://36b411e83b623ea3bc3a7bc6fda107a0@o4512167663239168.ingest.us.sentry.io/4512167685849088"
 	    CACHE STRING "Where crash reports go")
 	if(CL_SENTRY_DIR)
