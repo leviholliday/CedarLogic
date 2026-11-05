@@ -79,6 +79,13 @@ private:
 	class RailView* floater = nullptr;
 	class RailLabels* labels = nullptr;
 	GtkEventController* motion = nullptr;
+	// Every press over the window, before what's under it: a press anywhere
+	// but the rail (the canvas, in the hot strip) keeps the edge from
+	// peeking or sliding the rail out over it until the button's up.
+	GtkGesture* presses = nullptr;
+	bool buttonDown = false;
+	static void pressedCb(GtkGestureMultiPress*, int, double, double, gpointer self);
+	static void releasedCb(GtkGestureMultiPress*, int, double, double, gpointer self);
 	GtkWidget* menu = nullptr;
 
 	actions::FoldState fold;

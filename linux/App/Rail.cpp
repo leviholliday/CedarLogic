@@ -92,6 +92,12 @@ Rail::Rail(CircuitWindow* window) : win(window) {
 	gtk_event_controller_set_propagation_phase(motion, GTK_PHASE_CAPTURE);
 	g_signal_connect(motion, "motion", G_CALLBACK(motionCb), this);
 	g_signal_connect(top, "leave-notify-event", G_CALLBACK(leaveCb), this);
+	presses = gtk_gesture_multi_press_new(top);
+	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(presses), 0);
+	gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(presses), GTK_PHASE_CAPTURE);
+	g_signal_connect(presses, "pressed", G_CALLBACK(pressedCb), this);
+	g_signal_connect(presses, "released", G_CALLBACK(releasedCb), this);
+	g_signal_connect(presses, "cancel", CL_CALLBACK(+[](GtkGesture*, GdkEventSequence*, gpointer self) { static_cast<Rail*>(self)->buttonDown = false; }), this);
 	items = actions::rail();
 }
 
@@ -100,6 +106,10 @@ Rail::~Rail() {
 	if (motion) {
 		g_signal_handlers_disconnect_by_data(motion, this);
 		g_object_unref(motion);
+	}
+	if (presses) {
+		g_signal_handlers_disconnect_by_data(presses, this);
+		g_object_unref(presses);
 	}
 	if (GtkWidget* top = GTK_WIDGET(win->window())) g_signal_handlers_disconnect_by_data(top, this);
 	if (slideImage) cairo_surface_destroy(slideImage);
@@ -310,16 +320,6 @@ bool Rail::escape() {
 void Rail::tick() {
 	const double now = anim::now();
 	const bool f = folded() && onScreen();
-	// About to slide out, but a button went down in the strip (a press on the
-	// canvas there, not yet moved): it doesn't come out over the press.
-	if (hover.pending == 1 && pressed < 0 && overlay && gtk_widget_get_realized(overlay)) {
-		GdkWindow* gw = gtk_widget_get_window(GTK_WIDGET(win->window()));
-		GdkSeat* seat = gdk_display_get_default_seat(gdk_display_get_default());
-		GdkDevice* p = seat ? gdk_seat_get_pointer(seat) : nullptr;
-		GdkModifierType mask = (GdkModifierType)0;
-		if (gw && p) gdk_window_get_device_position(gw, p, nullptr, nullptr, &mask);
-		if (mask & (GDK_BUTTON1_MASK | GDK_BUTTON2_MASK | GDK_BUTTON3_MASK)) pointerGone();
-	}
 	const int r = hover.tick(now, f, hoverEnabled());
 	if (r == 1) startSlide(true);
 	else if (r == -1) startSlide(false);
@@ -375,7 +375,8 @@ void Rail::motionCb(GtkEventControllerMotion*, double, double, gpointer self) {
 	// A button held (a drag on the canvas, a box being drawn): the edge
 	// neither peeks nor slides the rail out over it, as the Mac's tracking
 	// doesn't during a drag -- unless it's a drag on the rail itself.
-	if ((state & (GDK_BUTTON1_MASK | GDK_BUTTON2_MASK | GDK_BUTTON3_MASK)) && r->pressed < 0) {
+	if (!(state & (GDK_BUTTON1_MASK | GDK_BUTTON2_MASK | GDK_BUTTON3_MASK))) r->buttonDown = false;
+	if (r->buttonDown && r->pressed < 0) {
 		// (Out already, it stays as it was until the button's let go.)
 		if (!r->hover.slidOut) guarded("the rail's edge", [&] { r->pointerGone(); });
 		return;
@@ -384,6 +385,20 @@ void Rail::motionCb(GtkEventControllerMotion*, double, double, gpointer self) {
 	if (!gtk_widget_translate_coordinates(r->overlay, GTK_WIDGET(r->win->window()), 0, 0, &ox, &oy)) return;
 	guarded("the rail's edge", [&] { r->pointerAt(x - ox, y - oy); });
 }
+
+void Rail::pressedCb(GtkGestureMultiPress*, int, double, double, gpointer self) {
+	Rail* r = static_cast<Rail*>(self);
+	// A press on the rail or its tab is the rail's own (it opens, folds, runs an action).
+	GdkEvent* ev = gtk_get_current_event();
+	GtkWidget* on = ev ? gtk_get_event_widget(ev) : nullptr;
+	if (ev) gdk_event_free(ev);
+	if ((r->dock && on == r->dock->widget()) || (r->floater && on == r->floater->widget())) return;
+	r->buttonDown = true;
+	// About to slide out (or peeking) over a press on the canvas there: not now.
+	if (!r->hover.slidOut) guarded("the rail's edge", [&] { r->pointerGone(); });
+}
+
+void Rail::releasedCb(GtkGestureMultiPress*, int, double, double, gpointer self) { static_cast<Rail*>(self)->buttonDown = false; }
 
 gboolean Rail::leaveCb(GtkWidget* w, GdkEventCrossing* e, gpointer self) {
 	Rail* r = static_cast<Rail*>(self);
