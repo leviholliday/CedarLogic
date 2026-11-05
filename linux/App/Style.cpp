@@ -427,9 +427,10 @@ void applyStyle() {
 			{
 				const Color hint = dark ? rgb255(170, 176, 188) : rgb255(82, 87, 97);
 				const Color chosen = mixColor(fieldFill, c.accent(), 0.16f), lit = mixColor(fieldFill, text, 0.05f);
-				m += all({ "row:selected .hint", "row:selected .dim-label", "row:active .hint" }) + " { color: " + css(readableOn(hint, chosen, 4.7)) +
-				     "; opacity: 1; }\n";
 				m += all({ "row:hover .hint", "row:hover .dim-label" }) + " { color: " + css(readableOn(hint, lit, 4.7)) + "; opacity: 1; }\n";
+				// (After the lit row's, and as specific: chosen and lit is chosen's tint.)
+				m += all({ "row:selected .hint", "row:selected .dim-label", "row:active .hint", "row:selected:hover .hint", "row:selected:hover .dim-label" }) +
+				     " { color: " + css(readableOn(hint, chosen, 4.7)) + "; opacity: 1; }\n";
 			}
 		}
 	}

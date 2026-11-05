@@ -237,7 +237,23 @@ bool readDrawn(GtkWidget* top, const Shot& shot, GtkWidget* text, Reading& out) 
 		cx1 = std::min(cx1, ax + gtk_widget_get_allocated_width(a));
 		cy1 = std::min(cy1, ay + gtk_widget_get_allocated_height(a));
 	}
-	if ((cx1 - cx0) * (cy1 - cy0) < 0.6 * w * h || cx1 <= cx0 || cy1 <= cy0) return false;
+	// ...and to every window it's drawn in (a menu's rows scroll inside one,
+	// under its scroll arrows; a list's inside its viewport's).
+	if (GdkWindow* topWin = gtk_widget_get_window(top)) {
+		int tx = 0, ty = 0;
+		gdk_window_get_origin(topWin, &tx, &ty);
+		for (GdkWindow* gw = gtk_widget_get_window(text); gw && gw != topWin; gw = gdk_window_get_parent(gw)) {
+			int gx = 0, gy = 0;
+			gdk_window_get_origin(gw, &gx, &gy);
+			gx -= tx;
+			gy -= ty;
+			cx0 = std::max(cx0, gx);
+			cy0 = std::max(cy0, gy);
+			cx1 = std::min(cx1, gx + gdk_window_get_width(gw));
+			cy1 = std::min(cy1, gy + gdk_window_get_height(gw));
+		}
+	}
+	if (cx1 <= cx0 || cy1 <= cy0 || (cx1 - cx0) * (cy1 - cy0) < 0.6 * w * h) return false;
 	const int k = Shot::kScale;
 	const int x0 = std::max(0, cx0 * k), y0 = std::max(0, cy0 * k), x1 = std::min(shot.w * k, cx1 * k), y1 = std::min(shot.h * k, cy1 * k);
 	if (x1 - x0 < 2 || y1 - y0 < 2) return false;

@@ -253,6 +253,7 @@ jobs:
       # as the Settings check (forced on the app with GTK_THEME), with the app light and dark.
       # Pictures of the open menus go with the Settings pictures.
       - name: Menu check
+        if: ${{ !cancelled() }}
         run: |
           mkdir -p renders/settings
           fails=0
@@ -294,7 +295,7 @@ jobs:
       # memory, the window freed on close). Seeds 1-4, then again with
       # G_DEBUG=fatal-criticals; each run capped at 7 minutes. A FAIL fails the build.
       - name: Session check
-        if: matrix.arch == 'x86_64'
+        if: ${{ !cancelled() && matrix.arch == 'x86_64' }}
         timeout-minutes: 30
         run: |
           SESSION_LOGS=session-logs linux/Tools/session-check.sh linux/build/cedarlogic 300 1 2 3 4
@@ -302,7 +303,7 @@ jobs:
       # On the other CPU, a short session: the checks it starts with (the canvas at the
       # window's right edge with the real pointer, the Actions panel) and a few actions.
       - name: Session check, short
-        if: matrix.arch != 'x86_64'
+        if: ${{ !cancelled() && matrix.arch != 'x86_64' }}
         timeout-minutes: 15
         run: |
           SESSION_LOGS=session-logs linux/Tools/session-check.sh linux/build/cedarlogic 20 2
