@@ -77,7 +77,17 @@ if(CL_BUILD_APP)
 	if(NOT CL_GIT_RC EQUAL 0 OR CL_GIT_COMMIT STREQUAL "")
 		set(CL_GIT_COMMIT "unknown")
 	endif()
-	target_compile_definitions(CedarLogic PRIVATE CL_VERSION="${PROJECT_VERSION}" CL_GIT_COMMIT="${CL_GIT_COMMIT}" CL_BUILD_TIME=${CL_BUILD_TIME}LL)
+	# The build number, as the Mac's (mac/build.sh) and Windows': the commit
+	# count. Usage stats send it (docs/PRIVACY.md); CI checks out the whole
+	# history for it (a shallow copy counts 1).
+	execute_process(COMMAND git -C "${ROOT}" rev-list --count HEAD
+	                OUTPUT_VARIABLE CL_BUILD_NUMBER OUTPUT_STRIP_TRAILING_WHITESPACE
+	                RESULT_VARIABLE CL_BUILD_NUMBER_RC ERROR_QUIET)
+	if(NOT CL_BUILD_NUMBER_RC EQUAL 0 OR NOT CL_BUILD_NUMBER MATCHES "^[0-9]+$")
+		set(CL_BUILD_NUMBER 0)
+	endif()
+	target_compile_definitions(CedarLogic PRIVATE CL_VERSION="${PROJECT_VERSION}" CL_GIT_COMMIT="${CL_GIT_COMMIT}" CL_BUILD_TIME=${CL_BUILD_TIME}LL
+	                           CL_BUILD_NUMBER=${CL_BUILD_NUMBER})
 	# Updates are signed (update-signing/UpdateSignature.h).
 	target_link_libraries(CedarLogic PRIVATE cl_updatesig)
 	set(CL_FEEDBACK_URL "https://cedarlogic.netlify.app" CACHE STRING "Where Send Feedback sends to")

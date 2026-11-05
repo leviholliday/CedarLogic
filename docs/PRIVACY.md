@@ -21,8 +21,8 @@ The question reads:
 >
 > — Levi
 
-This page covers the Mac and Windows apps; [On Windows](#on-windows) says
-where Windows differs. It uses the same words as the apps' "See exactly
+This page covers the Mac, Windows and Linux apps; [On Windows](#on-windows)
+and [On Linux](#on-linux) say where they differ. It uses the same words as the apps' "See exactly
 what's sent".
 
 ## Crash reports
@@ -171,6 +171,64 @@ used).
 The switches in Settings > Privacy are then greyed out, nothing of that kind
 is counted or sent, and with both set nobody is asked.
 
+## On Linux
+
+The Linux app (GTK, `linux/`) asks the same question with the same words, in
+the same places: "A small favour" is page 6 of 7 of the first-run welcome (no
+Continue or Skip there; Escape means No thanks), and anyone updating sees it
+once as a sheet over the circuit window, after What's New and before Show Me
+Around, never over the launch screen or the intro. On a small screen (the
+Raspberry Pi touchscreen's 800x480, a Wayland desktop's panels) both take the
+room the screen has and scroll. **Settings > Privacy** has both switches, See
+exactly what's sent, Last sent (the date and kind) and Delete what's been sent.
+
+**Crash reports** aren't in the Linux app yet: it has no crash reporter built
+in and sends none. The question is the same (one consent for both), and your
+answer is kept (`crashReports` in `native.ini`) for a version that has one;
+Settings > Privacy and "See exactly what's sent" say so.
+
+**Usage stats** are the same report, with:
+
+- `app.platform` `linux`; `app.os` the distribution and its major version
+  from `/etc/os-release` (`ID` and `VERSION_ID` up to the first dot:
+  `debian 12`, `ubuntu 24`, `raspbian 12`; a rolling one such as Arch just
+  `arch`; 16 characters at most); `app.arch` `x86_64` or `aarch64`
+  (Raspberry Pi 4 and 5, ARM laptops); `app.lang` the language only.
+- The same setting names as the Mac and Windows wherever the setting is the
+  same (`themeMode`, `accent`, `showGrid`, `gridStyle`, `majorGrid`,
+  `wireThickness`, `gateSize`, `gateLabels`, `toolbarStyle`, `actionsOn`,
+  `actionsCollapsed`, `actionsHoverOpen`, `openReplaces`, `tidyMode`,
+  `confirmQuit`, `atLaunch`, `testingGroup`...), plus `showPalette` and
+  `checkUpdates`. There's no Classroom on Linux, so `classroomSessions` is
+  always 0 and `classroomEnabled` isn't sent.
+- Commands counted where every one of them runs (the window's actions: the
+  menus, the keys, the toolbar, the Actions panel), by the action's id, never
+  a menu's text. Time counts while a CedarLogic window has the keyboard and
+  there's been a key, click or pointer move in it in the last 5 minutes.
+- What's been counted, the random id and any reports waiting to go are in
+  `~/.config/CedarLogic/usage.json`, mode 0600 (only you can read it; the
+  folder is 0700). The switch and your answer are in
+  `~/.config/CedarLogic/native.ini` (`usageStats`, `crashReports`,
+  `privacyAsked`, `privacyChoice`). Turning usage stats off deletes the id
+  and the counts, and asks the server to delete what it has.
+- Sent once a day at most, at launch, in the background, through the `curl`
+  program (run directly, never through a shell, not reading `~/.curlrc`):
+  HTTPS only, as JSON, with no Origin header. Without curl nothing is sent
+  (the `.deb` recommends it).
+
+**For labs and schools**, a file `/etc/cedarlogic/policy.ini` (root's, so
+users can't change it) with either or both of:
+
+```ini
+[Policy]
+DisableCrashReporting=true
+DisableUsageStats=true
+```
+
+(`true`, `1`, `yes` or `on`; the section name doesn't matter.) The switches
+in Settings > Privacy are then greyed out, nothing of that kind is counted or
+sent, and with both set nobody is asked (the welcome passes the page by).
+
 ## For developers
 
 - The app never sends from a test copy, a self-test, a render run or CI.
@@ -190,6 +248,19 @@ is counted or sent, and with both set nobody is asked.
   Sentry (`windows/Tools/sentry-mock.py`). Nothing is sent from a test or
   picture run, from CI, or with `CEDARLOGIC_HOME` or any `CL_` variable set,
   unless `CL_USAGE_URL` names a stand-in on the same PC or the site or one of
+  its drafts.
+- Linux: `cedarlogic --usage-check` (with `CL_USAGE_URL` pointing at
+  `mac/Tools/usage-check/server.py`, which checks `app.os` as
+  `<distribution> <major>` for Linux) runs the same checks against the same
+  stand-in; `--usage-live` runs the live one (with a throwaway id, deleted at
+  the end); `--privacy-check` presents the welcome's page and the sheet in
+  real windows on an X display and answers them with the real pointer
+  (xdotool), and with `CL_POLICY_FILE` naming a stand-in policy file and
+  `CL_EXPECT_POLICY=1` checks that nothing is asked, counted or offered. CI
+  (`.github/workflows/linux-native.yml`) runs the usage check and the consent
+  check at 1600x1000 and 800x480, and with the policy. Nothing is sent from a
+  test or picture run, from CI, or with any `CL_` variable set, unless
+  `CL_USAGE_URL` names a stand-in on the same computer or the site or one of
   its drafts.
 - The server side is `netlify/functions/usage.mjs` and `netlify/lib/usage.mjs`
   in the website's repository.

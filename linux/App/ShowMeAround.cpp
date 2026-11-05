@@ -1,6 +1,7 @@
 // Help > Show Me Around (see ShowMeAround.h).
 
 #include "ShowMeAround.h"
+#include "Privacy.h"
 #include "Anim.h"
 #include "Brand.h"
 #include "Canvas.h"
@@ -774,7 +775,8 @@ gboolean autoTick(gpointer) {
 	bool keep = true;
 	guarded("Show Me Around", [&] {
 		if (prefs().showMeAroundSeen || g.on || !g_wanted) { g_autoTimer = 0; keep = false; g_wanted = false; return; }
-		CircuitWindow* w = readyWindow();
+		// The privacy question (Privacy.h), if it's owed, comes first.
+		CircuitWindow* w = privacy::holdsShowMeAround() ? nullptr : readyWindow();
 		if (w == nullptr) { g_readySince = -1; return; }
 		// Ready for a moment (the window settled, the circuit's card played).
 		const double now = anim::now();

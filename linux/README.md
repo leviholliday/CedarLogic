@@ -25,6 +25,30 @@ libpango1.0-dev libfontconfig1-dev libfreetype-dev libssl-dev` on Debian,
 Ubuntu and Raspberry Pi OS; `openssl-devel` on Fedora, `openssl` on Arch).
 Sync talks to the website through the `curl` program, as Send Feedback does.
 
+Crash reports and usage stats ask once, as on the Mac and Windows
+(docs/PRIVACY.md): "A small favour" is the welcome's page 6 of 7, and
+anyone updating sees it once as a sheet over the circuit window, after
+What's New and before Show Me Around (`Privacy`, drawn in `Welcome`).
+Settings > Privacy has the two switches, See exactly what's sent, Last
+sent and Delete what's been sent. Usage stats (`UsageReport`, `UsageStats`)
+go once a day at most, at launch in the background, through curl too, to
+`https://cedarlogic.netlify.app/api/usage`; what's counted and the random id
+are in `~/.config/CedarLogic/usage.json` (0600). There's no crash reporter
+in the Linux app yet: the answer is kept for one, and nothing is sent. A
+lab can turn either off for everyone with `/etc/cedarlogic/policy.ini`:
+
+```ini
+[Policy]
+DisableCrashReporting=true
+DisableUsageStats=true
+```
+
+Checks: `cedarlogic --usage-check` (with `CL_USAGE_URL` pointing at
+`mac/Tools/usage-check/server.py`), `--usage-live` (the site's draft, a
+throwaway id), and `--privacy-check` (under Xvfb with xdotool: the consent
+clicked with the real pointer; `CL_POLICY_FILE` and `CL_EXPECT_POLICY=1` for
+the policy).
+
 Sync (Your Circuits on every device, `docs/SYNC.md`) is the shared engine in
 `mac/CedarCore/Sync*.cpp` with this machine's hooks (`App/SyncPlatform`:
 OpenSSL's libcrypto for the hashes and AES-GCM, GIO's zlib, curl with the

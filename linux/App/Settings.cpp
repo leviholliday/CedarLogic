@@ -1,6 +1,8 @@
 // Settings (see Settings.h).
 
 #include "Settings.h"
+#include "Privacy.h"
+#include "UsageStats.h"
 #include "Actions.h"
 #include "Anim.h"
 #include "Canvas.h"
@@ -46,11 +48,13 @@ void hintStyle(GtkWidget* h) {
 
 namespace {
 
-enum Page { General, Appearance, CanvasPage, ToolbarPage, ActionsPage, ShortcutsPage, SyncPage, PageCount };
-const char* kTitles[] = { "General", "Appearance", "Canvas", "Toolbar", "Actions", "Shortcuts", "Sync" };
+enum Page { General, Appearance, CanvasPage, ToolbarPage, ActionsPage, ShortcutsPage, SyncPage, PrivacyPage, PageCount };
+const char* kTitles[] = { "General", "Appearance", "Canvas", "Toolbar", "Actions", "Shortcuts", "Sync", "Privacy" };
 const char* kIcons[] = { "preferences-system-symbolic", "applications-graphics-symbolic", "input-mouse-symbolic",
-                         "view-more-horizontal-symbolic", Icon::Rail, "input-keyboard-symbolic", "emblem-synchronizing-symbolic" };
-static_assert(SyncPage == kSyncPage && ActionsPage == kActionsPage && PageCount == 7, "Settings.h names the Actions and Sync pages by number");
+                         "view-more-horizontal-symbolic", Icon::Rail, "input-keyboard-symbolic", "emblem-synchronizing-symbolic",
+                         "security-high-symbolic" };
+static_assert(SyncPage == kSyncPage && ActionsPage == kActionsPage && PrivacyPage == kPrivacyPage && PageCount == 8,
+              "Settings.h names the Actions, Sync and Privacy pages by number");
 // The window's width (the Mac's) and the page's margins.
 const float kBarH = 78, kWidth = 640;
 const int kMargin = 28;
@@ -289,7 +293,7 @@ private:
 	TitleButtons buttons;
 	anim::HoverFade hover, pick;
 	RectF itemRect(int i, float w) const {
-		const float iw = 74, total = iw * PageCount;
+		const float iw = 72, total = iw * PageCount;
 		const float x = (w - total) / 2 + i * iw;
 		return rectF(x + 2, 26, x + iw - 2, kBarH - 6);
 	}
@@ -762,6 +766,72 @@ GtkWidget* shortcutsPage(SettingsWindow* s) {
 	return box;
 }
 
+// ---- Privacy: crash reports and usage stats (Privacy.h) -------------------------------
+
+// A switch for a page row (left-aligned; greyed out when `enabled` is false).
+GtkWidget* toggle(bool value, bool enabled, std::function<void(bool)> changed) {
+	GtkWidget* sw = gtk_switch_new();
+	gtk_switch_set_active(GTK_SWITCH(sw), value);
+	gtk_widget_set_halign(sw, GTK_ALIGN_START);
+	gtk_widget_set_sensitive(sw, enabled);
+	on(sw, "notify::active", [sw, changed] { changed(gtk_switch_get_active(GTK_SWITCH(sw)) != FALSE); });
+	return sw;
+}
+
+GtkWidget* privacyPage() {
+	Rows r;
+	// Crash reports: kept for a build that has a crash reporter (the Linux app has none yet).
+	r.add("Crash reports", toggle(privacy::crashAllowed() == 1 && !privacy::crashPolicyOff(), !privacy::crashPolicyOff(), [](bool v) {
+		privacy::record(privacy::Choice::Custom, v, privacy::usageOn());
+	}), privacy::crashHint());
+	GtkWidget* usageSwitch = toggle(privacy::usageOn() && privacy::usageOffered(), privacy::usageOffered(), [](bool v) {
+		privacy::record(privacy::Choice::Custom, privacy::crashAllowed() == 1, v);
+	});
+	gtk_widget_set_name(usageSwitch, "privacy-usage-switch");
+	r.add("Usage stats", usageSwitch, privacy::usageHint());
+	GtkWidget* see = button("See exactly what's sent", [] {
+		GtkWidget* w = settings::window();
+		privacy::showWhatsSent(w ? GTK_WINDOW(w) : nullptr);
+	});
+	r.add("What's sent", see, privacy::kIdLine);
+	GtkWidget* last = gtk_label_new(privacy::lastSentLine().c_str());
+	gtk_label_set_xalign(GTK_LABEL(last), 0);
+	gtk_label_set_line_wrap(GTK_LABEL(last), TRUE);
+	gtk_label_set_max_width_chars(GTK_LABEL(last), 20);
+	gtk_widget_set_margin_top(last, 5);
+	r.add("Last sent", last);
+	GtkWidget* forget = gtk_button_new_with_label("Delete what's been sent");
+	gtk_widget_set_halign(forget, GTK_ALIGN_START);
+	GtkWidget* forgetHint = r.add("", forget, "The server deletes everything sent under this computer's id; if usage stats stay on, a new id starts.");
+	gtk_widget_set_sensitive(forget, privacy::usageOn() && privacy::usageOffered());
+	// The page's lines as things change (the switch, a send, a delete); gone with the page.
+	struct Live { GtkWidget* last; GtkWidget* forget; GtkWidget* hint; };
+	Live* live = new Live{ last, forget, forgetHint };
+	g_object_set_data_full(G_OBJECT(last), "cl-live", live, [](gpointer p) { delete static_cast<Live*>(p); });
+	static Live* g_live = nullptr;
+	g_live = live;
+	g_signal_connect(last, "destroy", CL_CALLBACK(+[](GtkWidget*, gpointer p) { if (g_live == p) g_live = nullptr; }), live);
+	usagestats::onChange([] {
+		if (g_live == nullptr) return;
+		gtk_label_set_text(GTK_LABEL(g_live->last), privacy::lastSentLine().c_str());
+		gtk_widget_set_sensitive(g_live->forget, privacy::usageOn() && privacy::usageOffered());
+	});
+	on(forget, "clicked", [] {
+		if (g_live == nullptr) return;
+		gtk_widget_set_sensitive(g_live->forget, FALSE);
+		if (g_live->hint) gtk_label_set_text(GTK_LABEL(g_live->hint), "Deleting\u2026");
+		usagestats::deleteSent([](bool done) {
+			if (g_live == nullptr) return;
+			if (g_live->hint)
+				gtk_label_set_text(GTK_LABEL(g_live->hint), done ? "Deleted: the server has nothing from this computer now."
+				                                               : "Couldn't reach the server. It's asked again the next time CedarLogic opens.");
+			gtk_label_set_text(GTK_LABEL(g_live->last), privacy::lastSentLine().c_str());
+			gtk_widget_set_sensitive(g_live->forget, privacy::usageOn() && privacy::usageOffered());
+		});
+	});
+	return r.grid;
+}
+
 GtkWidget* buildPage(SettingsWindow* s, int page) {
 	s->shortcutList = nullptr;
 	s->recording = nullptr;
@@ -772,6 +842,7 @@ GtkWidget* buildPage(SettingsWindow* s, int page) {
 	case ActionsPage: return actions::settingsPage();
 	case ShortcutsPage: return shortcutsPage(s);
 	case SyncPage: return syncui::settingsPage();
+	case PrivacyPage: return privacyPage();
 	default: return generalPage();
 	}
 }

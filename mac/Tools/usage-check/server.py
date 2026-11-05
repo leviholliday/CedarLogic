@@ -5,7 +5,8 @@
 # Every report is checked against the contract's shape; one that doesn't
 # fit is answered 400 and noted. As the real server, a request with an
 # Origin (or Sec-Fetch-*) header, which only a browser sends, is refused
-# (403). Also used by the Windows app's --usage-check (windows/App/PrivacyCheck.h).
+# (403). Also used by the Windows and Linux apps' --usage-check
+# (windows/App/PrivacyCheck.h, linux/App/PrivacyCheck.h).
 # Test controls (never part of the real API):
 #   POST /control {"fail": n, "status": 500, "tooMany": n, "noSnapshot": n, "reset": true,
 #                  "platform": "mac" | "windows" | "linux" (what app.platform must be; mac to begin with)}
@@ -44,7 +45,11 @@ def problems(b, raw):
     if app.get("platform") != ctl["platform"]: p.append("platform %s" % app.get("platform"))
     if app.get("arch") not in ("arm64", "x86_64", "aarch64"): p.append("arch")
     if not isinstance(app.get("build"), int): p.append("build")
-    if not re.match(r"^\d+\.\d+$", str(app.get("os", ""))): p.append("os is major.minor")
+    if ctl["platform"] == "linux":
+        # The distribution and its major version ("debian 12", "ubuntu 24"), or a rolling one's id ("arch").
+        if not (re.match(r"^[a-z0-9][a-z0-9._-]*( \d+)?$", str(app.get("os", ""))) and len(str(app.get("os", ""))) <= 16):
+            p.append("os is <distribution> <major>")
+    elif not re.match(r"^\d+\.\d+$", str(app.get("os", ""))): p.append("os is major.minor")
     if not re.match(r"^[a-z]{2,3}$", str(app.get("lang", ""))): p.append("lang")
     kind = b.get("kind")
     if kind not in ("snapshot", "delta", "ping"): p.append("kind")
