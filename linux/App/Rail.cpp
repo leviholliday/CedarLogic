@@ -141,9 +141,6 @@ GtkWidget* Rail::wrap(GtkWidget* row) {
 	gtk_widget_set_valign(f, GTK_ALIGN_FILL);
 	gtk_widget_set_no_show_all(f, TRUE);
 	gtk_overlay_add_overlay(GTK_OVERLAY(overlay), f);
-	// The overlay's own window round it passes everything through; the
-	// floater's takes what its input shape says (takesPointerFrom).
-	gtk_overlay_set_overlay_pass_through(GTK_OVERLAY(overlay), f, TRUE);
 	return overlay;
 }
 
@@ -242,6 +239,23 @@ void Rail::updateFloater() {
 		if (want == 1) takesPointerFrom(f, (int)(actions::kPeekWidth - actions::kTabWidth), (int)actions::kTabWidth);
 		else takesPointerFrom(f, 0, -1);
 		gtk_widget_show(f);
+		// The overlay puts it in a window of its own, which takes the pointer
+		// all over too: the same shape for that. (Not the overlay's
+		// pass-through: the desktop's crossing events then had the pointer
+		// leave the window as the rail slid out under it, and it went back.)
+		if (GdkWindow* own = gtk_widget_get_window(f))
+			if (GdkWindow* around = gdk_window_get_parent(own)) {
+				if (around == gtk_widget_get_window(overlay)) {
+					// (No window of its own round it.)
+				} else if (want == 1) {
+					const cairo_rectangle_int_t keep = { (int)(actions::kPeekWidth - actions::kTabWidth), 0, (int)actions::kTabWidth, 1 << 20 };
+					cairo_region_t* r = cairo_region_create_rectangle(&keep);
+					gdk_window_input_shape_combine_region(around, r, 0, 0);
+					cairo_region_destroy(r);
+				} else {
+					gdk_window_input_shape_combine_region(around, nullptr, 0, 0);
+				}
+			}
 	}
 	if (was == 2 || want == 2) labels->redrawShadow();
 	if (want != 2 && hovered >= 0 && folded()) setHovered(-1);
