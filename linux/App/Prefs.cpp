@@ -166,7 +166,12 @@ void Prefs::load() {
 		classicTabs = readBool(k, "classicTabs", classicTabs);
 		wireValueTag = readBool(k, "wireValueTag", wireValueTag);
 		confirmQuit = readBool(k, "confirmQuit", confirmQuit);
-		openReplaces = readBool(k, "openReplaces", openReplaces);
+		// Replacing the circuit you're in is the default, as on the Mac and
+		// Windows. Builds before this one wrote "false" whether or not anyone
+		// chose it, so those files take the default once; a choice made in
+		// Settings since (openReplacesSet) sticks.
+		openReplacesSet = readBool(k, "openReplacesSet", false);
+		openReplaces = openReplacesSet ? readBool(k, "openReplaces", openReplaces) : true;
 		newTemplate = readString(k, "newTemplate", newTemplate);
 		shortcuts = readString(k, "shortcuts", shortcuts);
 		checkUpdates = readBool(k, "checkUpdates", checkUpdates);
@@ -288,6 +293,7 @@ void Prefs::save() const {
 	g_key_file_set_boolean(k, kGroup, "wireValueTag", wireValueTag);
 	g_key_file_set_boolean(k, kGroup, "confirmQuit", confirmQuit);
 	g_key_file_set_boolean(k, kGroup, "openReplaces", openReplaces);
+	g_key_file_set_boolean(k, kGroup, "openReplacesSet", openReplacesSet);
 	g_key_file_set_string(k, kGroup, "newTemplate", newTemplate.c_str());
 	g_key_file_set_string(k, kGroup, "shortcuts", shortcuts.c_str());
 	g_key_file_set_boolean(k, kGroup, "checkUpdates", checkUpdates);

@@ -56,6 +56,9 @@ struct Prefs {
 	bool wireValueTag = false;    // resting on a wire shows what it carries
 	bool confirmQuit = true;      // Ctrl+Q asks first
 	bool openReplaces = true;     // opening a circuit replaces the one in the window (the Mac's default)
+	// Chosen in Settings (so a saved openReplaces is someone's choice): earlier
+	// builds saved "false" whether or not anyone chose it.
+	bool openReplacesSet = false;
 	std::string newTemplate;      // what Ctrl+N starts from: a template's id, or "" for a blank page
 	std::string shortcuts;        // changed shortcuts: "action=keys;..." (Shortcuts.cpp)
 	bool checkUpdates = true;     // look for a new version now and then

@@ -1937,6 +1937,93 @@ struct SessionDriver {
 		pump(300);
 	}
 
+	// Show Me Around by the real pointer (xdotool, so the display routes the
+	// clicks, as the Raspberry Pi's did): Next on the card clicked through all
+	// its stops, Back once, and on the canvas's stop a click in the lit hole
+	// (away from the card) reaching the canvas.
+	void tourPointerChecks() {
+		gWhat = "Show Me Around by the pointer";
+		const bool x11 = strcmp(G_OBJECT_TYPE_NAME(gdk_display_get_default()), "GdkX11Display") == 0;
+		gchar* tool = g_find_program_in_path("xdotool");
+		const bool haveTool = tool != nullptr;
+		g_free(tool);
+		if (!x11 || !haveTool) {
+			printf("session: Show Me Around by the pointer not checked (%s)\n", x11 ? "no xdotool" : "not an X display");
+			return;
+		}
+		watchPaused = true;
+		showme::setAssumeKeys(true);
+		closeWindowsOver();
+		gtk_window_present(w->window());
+		prefs().actionsOn = true;
+		prefs().actionsCollapsed = false;
+		actions::changed();
+		pump(300);
+		GtkWidget* t = top();
+		showme::start(w, 0);
+		waitFor([] { return showme::active(); }, 2000);
+		const int stops = (int)showme::shown().size();
+		check(showme::activeOn(w) && stops >= 6, format("Show Me Around starts for the pointer's walk (%d stops)", stops));
+		auto clickButton = [&](int which) {
+			waitFor([] { return showme::settled(); }, 2000);
+			pump(120);
+			double bx = 0, by = 0;
+			if (!showme::buttonCenter(which, bx, by)) return false;
+			std::string rx, ry;
+			return onScreen(t, bx, by, rx, ry) && xdo({ "mousemove", "--sync", rx, ry, "click", "1" });
+		};
+		int clicked = 0, wrong = 0;
+		std::string firstWrong;
+		bool backed = false, holeReached = false, holeTried = false;
+		for (int i = 0; i < stops + 2 && showme::active(); i++) {
+			const int at = showme::position();
+			// In the canvas's lit hole, away from the card: what's there takes the click.
+			if (showme::step() == showme::CanvasSpot && !holeTried) {
+				holeTried = true;
+				waitFor([] { return showme::settled(); }, 2000);
+				RectF hole{};
+				const RectF cr0 = showme::cardRect();
+				const RectF card = rectF(cr0.left - 12, cr0.top - 12, cr0.right + 12, cr0.bottom + 12);
+				if (showme::frame(showme::CanvasSpot, hole)) {
+					for (float fy = 0.2f; fy <= 0.8f && !holeReached; fy += 0.2f)
+						for (float fx = 0.15f; fx <= 0.85f && !holeReached; fx += 0.14f) {
+							const double px = hole.left + rectWidth(hole) * fx, py = hole.top + rectHeight(hole) * fy;
+							if (inRect(card, (float)px, (float)py)) continue;
+							std::string rx, ry;
+							if (!onScreen(t, px, py, rx, ry) || !xdo({ "mousemove", "--sync", rx, ry })) continue;
+							pump(40);
+							holeReached = underPointer() == canvas()->widget();
+							if (holeReached) { xdo({ "click", "1" }); pump(200); }
+						}
+				}
+				check(holeReached && showme::active(), "on the canvas's stop, a click in the lit hole (away from the card) reaches the canvas, and the walk goes on");
+			}
+			if (!clickButton(0)) { wrong++; if (firstWrong.empty()) firstWrong = format(" (no Next on stop %d)", at); break; }
+			clicked++;
+			waitFor([&] { return !showme::active() || showme::position() != at; }, 1500);
+			if (showme::active() && showme::position() != at + 1) {
+				wrong++;
+				if (firstWrong.empty()) firstWrong = format(" (Next on stop %d of %d left it on %d)", at, stops, showme::position());
+				break;
+			}
+			// Back once, from the second stop, and on again.
+			if (!backed && showme::active() && showme::position() == 2) {
+				backed = true;
+				const bool ok = clickButton(1);
+				waitFor([] { return showme::position() == 1; }, 1500);
+				check(ok && showme::position() == 1, format("Back, clicked on the second stop's card, goes back to the first (on %d)", showme::position()));
+				if (!clickButton(0)) { wrong++; break; }
+				waitFor([] { return showme::position() == 2; }, 1500);
+			}
+		}
+		check(wrong == 0 && clicked >= stops && !showme::active(),
+		      format("Next, clicked with the pointer on every stop's card, goes through all %d stops and ends it (%d clicks)", stops, clicked) + firstWrong);
+		if (showme::active()) showme::stop();
+		showme::setAssumeKeys(false);
+		watchPaused = false;
+		pump(300);
+	}
+
 	void tourChecks() {
 		gWhat = "Show Me Around";
 		watchPaused = true;
@@ -2146,6 +2233,8 @@ struct SessionDriver {
 		prefs().save();
 		pump(300);
 		guarded("the canvas at the right edge", [&] { edgeChecks(); });
+		pump(200);
+		guarded("Show Me Around by the pointer", [&] { tourPointerChecks(); });
 		pump(200);
 		guarded("the Actions rail's checks", [&] { railChecks(); });
 		pump(200);

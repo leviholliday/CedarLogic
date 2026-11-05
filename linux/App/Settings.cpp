@@ -372,6 +372,7 @@ GtkWidget* generalPage() {
 	};
 	*openHint = r.add("Opening a circuit", combo({ "Replace the current one", "Open in a new window" }, p.openReplaces ? 0 : 1, [openHint, openText](int i) {
 		prefs().openReplaces = i == 0;
+		prefs().openReplacesSet = true;
 		prefs().save();
 		if (*openHint) gtk_label_set_text(GTK_LABEL(*openHint), openText().c_str());
 	}), openText());

@@ -456,7 +456,10 @@ void invalidate(bool all = false) {
 	}
 }
 
-// Clicks on the dim go nowhere; in the hole they reach what's lit.
+// Clicks on the dim go nowhere; in the hole they reach what's lit; on the
+// card they're the card's, wherever it is -- also inside the hole (the
+// canvas's stop puts it there: cut out with the hole, its buttons took no
+// clicks at all on the Raspberry Pi, only the keys moved it on).
 void updateInputShape() {
 	const Layers* L = layersOf(g.win);
 	if (!L) return;
@@ -472,6 +475,14 @@ void updateInputShape() {
 			const cairo_rectangle_int_t hole = { (int)std::floor(h.left - lr.left), (int)std::floor(h.top - lr.top), (int)std::ceil(rectWidth(h)),
 			                                     (int)std::ceil(rectHeight(h)) };
 			cairo_region_subtract_rectangle(region, &hole);
+		}
+		if (g.card && g.cardW > 0 && g.cardH > 0) {
+			// Where the card ends up (aim() moves it there), and its pointer.
+			const RectF c = inflate(rectF(g.cardTo.x, g.cardTo.y, g.cardTo.x + g.cardW, g.cardTo.y + g.cardH), 9);
+			const cairo_rectangle_int_t card = { (int)std::floor(c.left - lr.left), (int)std::floor(c.top - lr.top), (int)std::ceil(rectWidth(c)),
+			                                     (int)std::ceil(rectHeight(c)) };
+			cairo_region_union_rectangle(region, &card);
+			cairo_region_intersect_rectangle(region, &all);
 		}
 		gtk_widget_input_shape_combine_region(layer, region);
 		cairo_region_destroy(region);
@@ -1032,6 +1043,21 @@ RectF cardRect() {
 	const PointF c = currentCard();
 	return rectF(c.x, c.y, c.x + g.cardW, c.y + g.cardH);
 }
+
+bool buttonCenter(int which, double& x, double& y) {
+	const int id = which == 0 ? kNext : which == 1 ? kBack : which == 2 ? kSkip : kLesson;
+	if (!g.on) return false;
+	const PointF c = currentCard();
+	for (const Hit& h : g.hits)
+		if (h.id == id) {
+			x = c.x + (h.r.left + h.r.right) / 2;
+			y = c.y + (h.r.top + h.r.bottom) / 2;
+			return true;
+		}
+	return false;
+}
+
+bool settled() { return g.on && g.moveStart < 0 && g.fadePhase == 0; }
 
 }  // namespace showme
 

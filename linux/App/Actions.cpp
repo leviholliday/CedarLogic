@@ -973,6 +973,20 @@ int check() {
 		return out;
 	};
 	auto onOpen = [] { return prefs().actionsOn && !prefs().actionsCollapsed; };
+
+	// ---- Opening a circuit replaces the one you're in, once for everyone ----
+	launchWith(nullptr);
+	expect(prefs().openReplaces, "a new install: opening a circuit replaces the one you're in");
+	launchWith("[CedarLogic]\nopenReplaces=false\n");
+	expect(prefs().openReplaces && !prefs().openReplacesSet,
+	       "an earlier build's openReplaces=false, never chosen (no openReplacesSet): replaces, as everyone's default");
+	launchWith("[CedarLogic]\nopenReplaces=false\nopenReplacesSet=true\n");
+	expect(!prefs().openReplaces, "openReplaces=false chosen in Settings (openReplacesSet=true): kept, a new window each time");
+	relaunch();
+	expect(!prefs().openReplaces && prefs().openReplacesSet && fileText().find("openReplacesSet=true") != std::string::npos,
+	       "and still so after a save and another launch");
+	launchWith("[CedarLogic]\nopenReplaces=true\nopenReplacesSet=true\n");
+	expect(prefs().openReplaces, "openReplaces=true chosen: kept");
 	auto state = [] { return format("on %d, folded %d", prefs().actionsOn, prefs().actionsCollapsed); };
 	launchWith(nullptr);
 	expect(onOpen() && prefs().actionsHoverOpen && !prefs().showMeAroundSeen,
