@@ -417,8 +417,20 @@ void Rail::releasedCb(GtkGestureMultiPress*, int, double, double, gpointer self)
 gboolean Rail::leaveCb(GtkWidget* w, GdkEventCrossing* e, gpointer self) {
 	Rail* r = static_cast<Rail*>(self);
 	// Out of the window altogether (not into a part of it, or a menu's grab).
-	if (e->window == gtk_widget_get_window(w) && e->detail != GDK_NOTIFY_INFERIOR && e->mode == GDK_CROSSING_NORMAL)
-		{ r->note(format("left the window (detail %d)", (int)e->detail)); guarded("the rail's edge", [&] { r->pointerGone(); }); }
+	if (e->window == gtk_widget_get_window(w) && e->detail != GDK_NOTIFY_INFERIOR && e->mode == GDK_CROSSING_NORMAL) {
+		// Only when it really has: the peeking tab coming up under the pointer
+		// at the edge can make GTK say the window was left (a "nonlinear
+		// virtual" crossing) with the pointer still in it, which put the tab
+		// back at once and the rail never slid out.
+		GdkWindow* gw = gtk_widget_get_window(w);
+		GdkSeat* seat = gdk_display_get_default_seat(gtk_widget_get_display(w));
+		GdkDevice* p = seat ? gdk_seat_get_pointer(seat) : nullptr;
+		double px = -1, py = -1;
+		if (gw && p) gdk_window_get_device_position_double(gw, p, &px, &py, nullptr);
+		const bool still = gw && px >= 0 && py >= 0 && px < gdk_window_get_width(gw) && py < gdk_window_get_height(gw);
+		r->note(format("%s the window (detail %d)", still ? "a leave, still in" : "left", (int)e->detail));
+		if (!still) guarded("the rail's edge", [&] { r->pointerGone(); });
+	}
 	return FALSE;
 }
 
