@@ -1,6 +1,7 @@
 // A circuit window (see Window.h).
 
 #include "Window.h"
+#include "UsageStats.h"
 #include "Actions.h"
 #include "Alert.h"
 #include "Canvas.h"
@@ -2105,6 +2106,9 @@ void CircuitWindow::destroy() {
 // ---- Commands -------------------------------------------------------------------
 
 void CircuitWindow::run(int command) {
+	// Every command, whichever way it came: counted for usage stats (once,
+	// when they're on: UsageStats.h).
+	usagestats::Counting counted(command);
 	auto editing = [&](void (CircuitWindow::*f)()) { if (canEdit()) (this->*f)(); else lockNudge(); };
 	Canvas* c = currentCanvas();
 	switch (command) {

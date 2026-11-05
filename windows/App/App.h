@@ -149,6 +149,14 @@ struct Prefs {
 	bool confirmQuit = true;                      // Ctrl+Q asks first
 	std::string seenWhatsNew;                     // the version What's New was last shown for
 	int startMenu = 0;                            // a copy from the zip: 0 not asked, 1 added to Start, 2 not wanted
+	// Crash reports and usage stats (Privacy.h, docs/PRIVACY.md), asked once,
+	// as the Mac's cl.crashReports, cl.usageStats, cl.privacyAsked and
+	// cl.privacyChoice. The usage id and what's counted are in
+	// %APPDATA%\CedarLogic\Usage\usage.json (UsageReport.h), not here.
+	int crashReports = -1;                        // -1 not chosen yet, 0 off, 1 on
+	bool usageStats = false;                      // the switch
+	bool privacyAsked = false;
+	std::string privacyChoice;                    // "yes", "no" or "custom" ("" not asked)
 
 	double wireScale() const;
 	void load();

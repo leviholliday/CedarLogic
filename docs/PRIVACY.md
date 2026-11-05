@@ -21,8 +21,9 @@ The question reads:
 >
 > — Levi
 
-This page covers the Mac app. It uses the same words as the app's "See
-exactly what's sent" sheet.
+This page covers the Mac and Windows apps; [On Windows](#on-windows) says
+where Windows differs. It uses the same words as the apps' "See exactly
+what's sent".
 
 ## Crash reports
 
@@ -119,6 +120,57 @@ preference (a configuration profile for the app's bundle id,
 The switches in Settings > Privacy are then greyed out, and nothing of that
 kind is counted or sent.
 
+## On Windows
+
+The Windows app asks the same question with the same words, in the same
+places: "A small favour" is page 6 of the first-run welcome (no Continue or
+Skip there; Escape means No thanks), and anyone updating sees it once as a
+sheet over the circuit window, after What's New and before Show Me Around.
+**Settings > Privacy** has both switches, See What's Sent..., Last sent (the
+date and kind) and Delete What's Been Sent...
+
+**Crash reports** go to the same Sentry project as the Mac's, tagged
+`platform=windows`. They use sentry-native's in-process backend: when
+CedarLogic crashes, the report (where in the app it went wrong, as addresses
+in its modules, and the Windows and CedarLogic versions) is written to
+`%LOCALAPPDATA%\CedarLogic\Crash reports` and sent the next time CedarLogic
+opens, if crash reports are still on. Before it goes, every path loses its
+user name (`C:\Users\<user>\...`), your user name and your PC's name are
+taken out wherever they are, and a report that still has one in it is
+dropped rather than sent. There's no trail of clicks or network requests,
+no session tracking, no user and no memory dump (crashpad's minidump would
+carry raw memory and full paths, which can't be cleaned first, so it isn't
+used).
+
+**Usage stats** are the same report, with:
+
+- `app.platform` `windows`, `app.os` `10.0` for Windows 10 or `11.0` for
+  Windows 11 (build 22000 on), `app.arch` `x86_64` or `aarch64` (ARM PCs).
+- The same setting names as the Mac wherever the setting is the same
+  (`gateLabels`, `categoryShortcuts`, `trackpadScroll` for the touchpad's
+  two-finger scroll...), plus `showPalette` and `checkUpdates`. There's no
+  Classroom on Windows, so `classroomSessions` is always 0 and
+  `classroomEnabled` isn't sent.
+- Commands counted where every one of them runs (`CircuitWindow::run`), by
+  the action's id, never a menu's text.
+- What's been counted, the random id and any reports waiting to go are in
+  `%APPDATA%\CedarLogic\Usage\usage.json`, which only your Windows user can
+  open (its folder too). The switch and your answer are in
+  `%APPDATA%\CedarLogic\native.ini` (`usageStats`, `crashReports`,
+  `privacyAsked`, `privacyChoice`). Turning usage stats off deletes the id
+  and the counts, and asks the server to delete what it has.
+- Sent with WinHTTP over HTTPS only, as JSON, with no Origin header.
+
+**For labs and schools**, two DWORD values of 1 under
+`HKLM\Software\Policies\CedarLogic` (a Group Policy registry item, or
+`reg add`):
+
+- `DisableCrashReporting`: no crash reports
+- `DisableUsageStats`: no usage stats
+
+The switches in Settings > Privacy are then greyed out, nothing of that kind
+is counted or sent, and with both set nobody is asked.
+
 ## For developers
 
 - The app never sends from a test copy, a self-test, a render run or CI.
@@ -128,5 +180,16 @@ kind is counted or sent.
   server; `CL_USAGE_URL=https://<draft>--cedarlogic.netlify.app/api/usage
   mac/Tools/usage-check.sh --live` runs snapshot, delta, ping and DELETE
   against a real one with a throwaway id.
+- Windows: `CedarLogic.exe --usage-check` (with `CL_USAGE_URL` pointing at
+  `mac/Tools/usage-check/server.py`) runs the same checks against the same
+  stand-in; `--usage-live` runs the live one; `--crash-check` checks the
+  crash reports' cleaning; `--privacy-check` presents the welcome's page and
+  the sheet in real windows and answers them with real clicks and keys. CI
+  (`.github/workflows/windows-native.yml`) runs them all, and crashes a copy
+  of the app on purpose to check the report that arrives at a stand-in for
+  Sentry (`windows/Tools/sentry-mock.py`). Nothing is sent from a test or
+  picture run, from CI, or with `CEDARLOGIC_HOME` or any `CL_` variable set,
+  unless `CL_USAGE_URL` names a stand-in on the same PC or the site or one of
+  its drafts.
 - The server side is `netlify/functions/usage.mjs` and `netlify/lib/usage.mjs`
   in the website's repository.

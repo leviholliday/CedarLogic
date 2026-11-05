@@ -3,8 +3,12 @@
 #   POST   /api/usage          a report -> 200 {"ok": true, "haveSnapshot": bool}
 #   DELETE /api/usage?id=<id>  forget the id -> 200 {"ok": true}
 # Every report is checked against the contract's shape; one that doesn't
-# fit is answered 400 and noted. Test controls (never part of the real API):
-#   POST /control {"fail": n, "status": 500, "tooMany": n, "noSnapshot": n, "reset": true}
+# fit is answered 400 and noted. As the real server, a request with an
+# Origin (or Sec-Fetch-*) header, which only a browser sends, is refused
+# (403). Also used by the Windows app's --usage-check (windows/App/PrivacyCheck.h).
+# Test controls (never part of the real API):
+#   POST /control {"fail": n, "status": 500, "tooMany": n, "noSnapshot": n, "reset": true,
+#                  "platform": "mac" | "windows" | "linux" (what app.platform must be; mac to begin with)}
 #   GET  /log     every request: method, path, user agent, body, problems
 #   GET  /store   what's held per id (the settings it has, reports seen)
 #   python3 server.py <port file>
@@ -25,7 +29,7 @@ def words(k): return [w for w in re.split(r"[\s._]+", re.sub(r"([a-z0-9])([A-Z])
 COUNTERS = {"sessions", "activeSeconds", "focusSeconds", "simViewSeconds", "classroomSessions", "syncOn", "actions"}
 
 log, store = [], {}
-ctl = {"fail": 0, "status": 500, "tooMany": 0, "noSnapshot": 0}
+ctl = {"fail": 0, "status": 500, "tooMany": 0, "noSnapshot": 0, "platform": "mac"}
 
 def canonical(settings):
     return json.dumps(settings, sort_keys=True, separators=(",", ":"))
@@ -37,7 +41,8 @@ def problems(b, raw):
     if not isinstance(b.get("id"), str) or not ID.match(b["id"]): p.append("id")
     app = b.get("app") or {}
     if set(app) != {"platform", "version", "build", "os", "arch", "lang"}: p.append("app keys %s" % sorted(app))
-    if app.get("platform") != "mac": p.append("platform")
+    if app.get("platform") != ctl["platform"]: p.append("platform %s" % app.get("platform"))
+    if app.get("arch") not in ("arm64", "x86_64", "aarch64"): p.append("arch")
     if not isinstance(app.get("build"), int): p.append("build")
     if not re.match(r"^\d+\.\d+$", str(app.get("os", ""))): p.append("os is major.minor")
     if not re.match(r"^[a-z]{2,3}$", str(app.get("lang", ""))): p.append("lang")
@@ -88,10 +93,15 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/store": return self.reply(200, store)
         self.reply(404, {"error": "not here"})
 
+    def browser(self):
+        return any(self.headers.get(h) is not None for h in ("origin", "sec-fetch-site", "sec-fetch-mode"))
+
     def do_DELETE(self):
         u = urlparse(self.path)
         ident = (parse_qs(u.query).get("id") or [""])[0]
-        log.append({"method": "DELETE", "path": u.path, "id": ident, "ua": self.headers.get("user-agent", "")})
+        log.append({"method": "DELETE", "path": u.path, "id": ident, "ua": self.headers.get("user-agent", ""),
+                    "origin": self.headers.get("origin", "")})
+        if self.browser(): return self.reply(403, {"ok": False, "error": "From the CedarLogic apps only."})
         if u.path != "/api/usage" or not ID.match(ident): return self.reply(400, {"error": "bad id"})
         store.pop(ident, None)
         self.reply(200, {"ok": True})
@@ -102,16 +112,20 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/control":
             c = json.loads(raw or b"{}")
             if c.get("reset"):
-                log.clear(); store.clear(); ctl.update({"fail": 0, "status": 500, "tooMany": 0, "noSnapshot": 0})
-            for k in ("fail", "status", "tooMany", "noSnapshot"):
+                log.clear(); store.clear(); ctl.update({"fail": 0, "status": 500, "tooMany": 0, "noSnapshot": 0, "platform": "mac"})
+            for k in ("fail", "status", "tooMany", "noSnapshot", "platform"):
                 if k in c: ctl[k] = c[k]
             return self.reply(200, {"ok": True})
         if u.path != "/api/usage": return self.reply(404, {"error": "not here"})
         try: b = json.loads(raw)
         except Exception: b = {}
         entry = {"method": "POST", "path": u.path, "ua": self.headers.get("user-agent", ""), "body": b, "bytes": len(raw),
-                 "raw": raw.decode("utf-8", "replace")}
+                 "raw": raw.decode("utf-8", "replace"), "origin": self.headers.get("origin", ""),
+                 "ctype": (self.headers.get("content-type") or "").split(";")[0].strip().lower()}
         log.append(entry)
+        if self.browser():
+            entry["answer"] = 403
+            return self.reply(403, {"ok": False, "error": "From the CedarLogic apps only."})
         if ctl["fail"] > 0:
             ctl["fail"] -= 1; entry["answer"] = ctl["status"]
             return self.reply(ctl["status"], {"error": "down"})

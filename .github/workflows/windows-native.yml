@@ -34,15 +34,46 @@ jobs:
           # ARM laptops (Snapdragon): cross-built; this runner can't start it.
           - { arch: ARM64, run: false }
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history: the build number is the commit count, as on the
+          # Mac (usage stats send it: docs/PRIVACY.md).
+          fetch-depth: 0
+
+      # Crash reports (windows/App/CrashReports.h): sentry-native, a pinned
+      # release's source (checked against the SHA-256 GitHub keeps for it),
+      # built here with its in-process backend, static, on the static C++
+      # runtime, and kept in the cache for the next run -- never in git.
+      - name: Cache sentry-native
+        id: sentry-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: sentry-dist
+          key: sentry-native-0.17.4-inproc-static-${{ matrix.arch }}-v1
+
+      - name: Build sentry-native
+        if: steps.sentry-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          V=0.17.4
+          curl -sSfL --retry 3 -o sentry-native.zip "https://github.com/getsentry/sentry-native/releases/download/$V/sentry-native.zip"
+          echo "804811557b5d42ddd51cb1241bf851964d75547a4eb7b5ad97b73a4de965ab25  sentry-native.zip" | sha256sum -c -
+          mkdir -p sentry-src
+          (cd sentry-src && 7z x -y ../sentry-native.zip > /dev/null)
+          cmake -S sentry-src -B sentry-build -A ${{ matrix.arch }} -DSENTRY_BACKEND=inproc -DSENTRY_BUILD_SHARED_LIBS=OFF \
+            -DSENTRY_BUILD_RUNTIMESTATIC=ON -DSENTRY_BUILD_TESTS=OFF -DSENTRY_BUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX="$PWD/sentry-dist"
+          cmake --build sentry-build --config Release --parallel
+          cmake --install sentry-build --config Release
+          find sentry-dist -maxdepth 3 | head -30
 
       - name: Build
         shell: bash
         run: |
-          cmake -S windows -B windows/build -A ${{ matrix.arch }} -DCL_BUILD_TOOLS=${{ matrix.run && 'ON' || 'OFF' }}
+          cmake -S windows -B windows/build -A ${{ matrix.arch }} -DCL_BUILD_TOOLS=${{ matrix.run && 'ON' || 'OFF' }} -DCL_SENTRY_DIR="$PWD/sentry-dist"
           cmake --build windows/build --config Release --parallel
+          grep -E '^CL_SENTRY_DIR' windows/build/CMakeCache.txt
 
       # The engine through the C interface the app uses: editing, wires,
       # simulation, truth tables, and saving without changing a circuit --
@@ -356,7 +387,7 @@ jobs:
           timeout 90 "$A" --dialog check --check "0, 1, 2, 3, 4, 5, 6, 7, repeat" --screenshot "$PWD/renders/check-count.png" $T/template-builtin-count-3bit.cdl || true
           timeout 90 "$A" --dark --dialog check --check "0, 1, 3, 2, repeat" --screenshot "$PWD/renders/check-count-wrong-dark.png" $T/template-builtin-count-3bit.cdl || true
           timeout 90 "$A" --dark --dialog add-gate --screenshot "$PWD/renders/dialog-add-gate-dark.png" || true
-          for p in 0 1 2 3 4 5; do timeout 90 "$A" --dialog welcome --page $p --screenshot "$PWD/renders/welcome-$p.png" || true; done
+          for p in 0 1 2 3 4 5 6; do timeout 90 "$A" --dialog welcome --page $p --screenshot "$PWD/renders/welcome-$p.png" || true; done
           # The welcome's Actions panel page with the panel off, and with Open on hover off.
           timeout 90 "$A" --rail off --dialog welcome --page 2 --screenshot "$PWD/renders/welcome-2-off.png" || true
           timeout 90 "$A" --dialog tour --screenshot "$PWD/renders/tour.png" || true
@@ -474,6 +505,20 @@ jobs:
           for p in 0 1 2 3 4 5; do
             timeout 90 "$A" --light --dialog preferences --page $p --screenshot "$PWD/renders/settings-$p.png" || true
             timeout 90 "$A" --dark --dialog preferences --page $p --screenshot "$PWD/renders/settings-$p-dark.png" || true
+          done
+          # Crash reports and usage stats (windows/App/Privacy.h): the welcome's
+          # "A small favour" (and its two switches), the updaters' sheet (the
+          # brand's look either way), "See exactly what's sent" and Settings >
+          # Privacy, light and dark, into renders/privacy.
+          mkdir -p renders/privacy
+          timeout 90 "$A" --dialog welcome --page 5 --screenshot "$PWD/renders/privacy/welcome-privacy.png" || true
+          timeout 90 "$A" --dialog welcome --page 5 --privacy-choose --screenshot "$PWD/renders/privacy/welcome-privacy-choose.png" || true
+          timeout 90 "$A" --light --dialog privacy-sheet --screenshot "$PWD/renders/privacy/updater-sheet-light.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dark --dialog privacy-sheet --screenshot "$PWD/renders/privacy/updater-sheet-dark.png" res/samples/practice.cdl || true
+          timeout 90 "$A" --dark --dialog privacy-sheet --privacy-choose --screenshot "$PWD/renders/privacy/updater-sheet-choose-dark.png" res/samples/practice.cdl || true
+          for t in light dark; do
+            timeout 90 "$A" --$t --dialog whats-sent --screenshot "$PWD/renders/privacy/whats-sent-$t.png" || true
+            timeout 90 "$A" --$t --dialog preferences --page 7 --screenshot "$PWD/renders/privacy/settings-privacy-$t.png" || true
           done
           # Settings > Sync, off and on (sample devices, with Remove), what Remove asks, the code sheet with its QR
           # code, and what linking asks.
@@ -702,6 +747,99 @@ jobs:
       # and a gate dragged from the side panel onto the canvas, each checked for its effect: a
       # picture can't show that a button does nothing. Once in each toolbar
       # style (Minimal leaves most tools to its ••• menu, so they're skipped).
+      # Usage stats (windows/App/UsageReport.h) against the Mac's stand-in for
+      # the site's /api/usage (mac/Tools/usage-check/server.py): snapshot
+      # first, delta, ping, haveSnapshot false, 7 kept while it's down, 429,
+      # retries, DELETE (and later when offline), policy off, the caps, no
+      # Origin header, the file only this user can open, and the leak scan of
+      # real reports. One report of each kind goes into the renders.
+      - name: Usage stats check
+        if: matrix.run
+        shell: bash
+        run: |
+          mkdir -p renders/privacy
+          PY=$(command -v python || command -v python3)
+          rm -f uport
+          "$PY" mac/Tools/usage-check/server.py uport &
+          SERVER=$!
+          for _ in $(seq 100); do [ -s uport ] && break; sleep 0.1; done
+          code=0
+          CL_USAGE_URL="http://127.0.0.1:$(cat uport)" USAGE_SAMPLES="$PWD/renders/privacy/usage-samples.txt" \
+            timeout 180 package/CedarLogic/CedarLogic.exe --usage-check || code=$?
+          kill $SERVER 2>/dev/null || true
+          exit $code
+
+      # The same against the site's live draft (its own store, for testing),
+      # with a throwaway id: snapshot, delta, ping, DELETE, then a ping for
+      # the id finds no snapshot. The network's, so it doesn't hold the build back.
+      - name: Usage stats check, live draft
+        if: matrix.run
+        shell: bash
+        continue-on-error: true
+        run: CL_USAGE_URL=https://usage-stats-test--cedarlogic.netlify.app/api/usage timeout 120 package/CedarLogic/CedarLogic.exe --usage-live
+
+      # Crash reports (windows/App/CrashReports.h): the cleaning on a made-up
+      # report full of this PC's paths and names, Sentry starting and stopping;
+      # then a real crash (CL_TEST_CRASH) of a copy run from under the profile
+      # folder (so its own path has the user name in it), the report it left
+      # sent at the next launch to a stand-in for Sentry
+      # (windows/Tools/sentry-mock.py), and that report scanned: the crash is
+      # there, tagged platform=windows, with no user name, computer name or
+      # profile path in it.
+      - name: Crash reports check
+        if: matrix.run
+        shell: bash
+        run: |
+          mkdir -p renders/privacy
+          timeout 120 package/CedarLogic/CedarLogic.exe --crash-check
+          PY=$(command -v python || command -v python3)
+          rm -f sport
+          "$PY" windows/Tools/sentry-mock.py sport "$PWD/renders/privacy/crash-report.txt" &
+          SERVER=$!
+          for _ in $(seq 100); do [ -s sport ] && break; sleep 0.1; done
+          D="$LOCALAPPDATA/CedarLogic Crash Check"
+          rm -rf "$D" && cp -r package/CedarLogic "$D"
+          H=$(mktemp -d)
+          printf '[CedarLogic]\ncrashReports=1\nprivacyAsked=true\nprivacyChoice=custom\nhasSeenWelcome=true\nshowMeAroundSeen=true\nintroAtLaunch=none\nfirstLaunchPlayed=true\nintroFirstLaunchPlayed=true\ncheckUpdates=false\nstartMenu=2\n' > "$H/native.ini"
+          DSN="http://0123456789abcdef0123456789abcdef@127.0.0.1:$(cat sport)/1"
+          export CEDARLOGIC_HOME="$(cygpath -w "$H")" CL_SENTRY_DSN="$DSN"
+          CL_TEST_CRASH=1 timeout 90 "$D/CedarLogic.exe" && echo "::warning::the test crash didn't crash" || echo "crashed (exit $?)"
+          timeout 30 "$D/CedarLogic.exe" || true
+          kill $SERVER 2>/dev/null || true
+          "$PY" windows/Tools/sentry-mock.py --check "$PWD/renders/privacy/crash-report.txt"
+
+      # The consent in real, visible windows with real input (the Mac's
+      # sheet crashed on first launch, so this is never only a picture): the
+      # welcome's page (No thanks clicked), the updaters' sheet after What's
+      # New and before Show Me Around (Yes clicked), Escape, Choose what to
+      # send and its switches, See exactly what's sent, asked once, and each
+      # answer saved in native.ini. Then the lab policy keys in
+      # HKLM\Software\Policies\CedarLogic: nothing offered, nothing counted,
+      # nobody asked, Settings > Privacy greyed out (and its picture).
+      - name: Privacy consent check
+        if: matrix.run
+        shell: bash
+        run: timeout 300 package/CedarLogic/CedarLogic.exe --privacy-check
+
+      - name: Privacy policy check
+        if: matrix.run
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\Software\Policies\CedarLogic'
+          New-Item -Path $key -Force | Out-Null
+          New-ItemProperty -Path $key -Name DisableCrashReporting -PropertyType DWord -Value 1 -Force | Out-Null
+          New-ItemProperty -Path $key -Name DisableUsageStats -PropertyType DWord -Value 1 -Force | Out-Null
+          try {
+            $env:CL_EXPECT_POLICY = '1'
+            $p = Start-Process -FilePath package\CedarLogic\CedarLogic.exe -ArgumentList '--privacy-check' -NoNewWindow -Wait -PassThru -RedirectStandardOutput policy.log
+            Get-Content policy.log
+            Remove-Item Env:CL_EXPECT_POLICY
+            Start-Process -FilePath package\CedarLogic\CedarLogic.exe -ArgumentList '--light','--dialog','preferences','--page','7','--screenshot',"$PWD\renders\privacy\settings-privacy-policy.png" -NoNewWindow -Wait
+            if ($p.ExitCode -ne 0) { throw "the policy check failed ($($p.ExitCode))" }
+          } finally {
+            Remove-Item -Path $key -Recurse -Force
+          }
+
       - name: Click test
         if: matrix.run
         shell: bash
@@ -906,6 +1044,16 @@ jobs:
             CedarLogic-Windows-native-${{ matrix.arch }}.zip
             CedarLogic-Windows-Setup-${{ matrix.arch }}.exe
           if-no-files-found: error
+
+      # The app's .pdb (not shipped): what turns a crash report's addresses
+      # into functions and lines.
+      - name: Upload symbols
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: CedarLogic-Windows-symbols-${{ matrix.arch }}
+          path: windows/build/Release/CedarLogic.pdb
+          if-no-files-found: warn
+          retention-days: 90
 
       - name: Upload renders
         if: always() && matrix.run

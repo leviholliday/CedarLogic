@@ -9,6 +9,7 @@
 #include "Commands.h"
 #include "Actions.h"
 #include "Dialogs.h"
+#include "Privacy.h"
 #include "Shortcuts.h"
 #include "ShowMeAround.h"
 #include "SyncApp.h"
@@ -439,6 +440,179 @@ bool panelClick(int id) {
 	return true;
 }
 
+// ---- "A small favour": the privacy question ---------------------------------------
+// The welcome's page and the updaters' sheet (Privacy.h), as the Mac's
+// PrivacyAskView: the note in a quote card, the intro's lamp lit beside it
+// and the card's edge lighting once as it comes up; two equal buttons, Yes
+// and No thanks; under them "Choose what to send" (the two switches and
+// Continue with These) and "See exactly what's sent". Drawn with a null
+// target, it only measures (the sheet's height).
+
+enum { kAskYes = 700, kAskNo, kAskChoose, kAskSent, kAskCrash, kAskUsage, kAskContinue, kAskEnd };
+
+struct Ask {
+	bool choosing = false;
+	bool crash = false, usage = false;
+	double shownAt = -1;   // the glow's clock (from the first frame)
+	privacy::Choice answered = privacy::Choice::None;
+	// Each control as last drawn, in the panel's points (for the real
+	// clicks of --privacy-check).
+	D2D1_RECT_F rects[kAskEnd - kAskYes] = {};
+	bool drawn[kAskEnd - kAskYes] = {};
+	void reset() {
+		choosing = false;
+		crash = privacy::crashAllowed() == 1;
+		usage = privacy::usageOn();
+		shownAt = -1;
+		answered = privacy::Choice::None;
+		for (bool& d : drawn) d = false;
+	}
+};
+
+// The card's one-time glow: up from 0.25 s, held, and settling from 1.6 s.
+float askGlow(double t) {
+	if (t < 0.25) return 0;
+	if (t < 0.75) return (float)easeOut((t - 0.25) / 0.5);
+	if (t < 1.6) return 1;
+	if (t < 2.5) return (float)(1 - easeOut((t - 1.6) / 0.9));
+	return 0;
+}
+bool askAnimating(const Ask& a) { return a.shownAt < 0 || nowSeconds() - a.shownAt < 2.7; }
+
+void askHit(Panel& panel, Ask& a, const D2D1_RECT_F& r, int id) {
+	panel.addHit(r, id);
+	a.rects[id - kAskYes] = r;
+	a.drawn[id - kAskYes] = true;
+}
+
+// Yes and No: the same size, weight and colour (the Mac's PrivacyChoiceStyle).
+void choiceButton(ID2D1RenderTarget* rt, const D2D1_RECT_F& r, const std::string& label, bool chosen, bool hot) {
+	const float rad = (r.bottom - r.top) / 2;
+	fillRound(rt, r, rad, D2D1::ColorF(1, 1, 1, hot ? 0.15f : 0.08f));
+	strokeRound(rt, D2D1::RectF(r.left + 0.5f, r.top + 0.5f, r.right - 0.5f, r.bottom - 0.5f), rad, alpha(kNeon, hot ? 0.75f : 0.45f));
+	const std::string shown = chosen ? "✓  " + label : label;
+	text(rt, shown, r.left, (r.top + r.bottom - 13.5f * 1.34f) / 2, 13.5f, kSemi, kPrimary, r.right - r.left, DWRITE_TEXT_ALIGNMENT_CENTER);
+}
+
+// The question from (x, y), `w` wide; returns its height.
+float paintAsk(ID2D1RenderTarget* rt, Panel& panel, Ask& a, float x, float y, float w, bool compact) {
+	if (rt && a.shownAt < 0) a.shownAt = nowSeconds();
+	const double t = a.shownAt < 0 ? 0 : nowSeconds() - a.shownAt;
+	const float gap = compact ? 14.0f : 18.0f;
+	float at = y;
+	std::string eyebrow = privacy::kEyebrow;
+	for (char& c : eyebrow) c = (char)toupper((unsigned char)c);
+	at += text(rt, eyebrow, x, at, 11, kBold, kNeon, 0, DWRITE_TEXT_ALIGNMENT_LEADING, 1.6f) + 8;
+	at += text(rt, privacy::kTitle, x, at, 28, kBold, kPrimary, w) + gap;
+
+	// The note, in a quote card, the lamp lit beside it.
+	const float noteSize = compact ? 13.5f : 14.5f;
+	const float textX = x + 18 + 34 + 16, textW = x + w - 18 - textX;
+	const std::string quote = std::string("“") + privacy::kNote + "”";
+	const float nh = text(nullptr, quote, 0, 0, noteSize, kNormal, kPrimary, textW);
+	const float sh = text(nullptr, "— Levi", 0, 0, 12, kNormal, kSecondary);
+	const float cardH = 18 + nh + 10 + sh + 18;
+	const D2D1_RECT_F card = D2D1::RectF(x, at, x + w, at + cardH);
+	if (rt) {
+		const float g = askGlow(t);
+		if (g > 0.01f) glow(rt, card, 14, alpha(kNeon, 0.3f * g), 14);
+		fillRound(rt, card, 14, alpha(kNeon, 0.05f + 0.05f * g));
+		strokeRound(rt, D2D1::RectF(card.left + 0.5f, card.top + 0.5f, card.right - 0.5f, card.bottom - 0.5f), 14, alpha(kNeon, 0.22f + 0.48f * g),
+		            1 + 0.4f * g);
+		fillRound(rt, D2D1::RectF(x, at + 14, x + 3, at + cardH - 14), 1.5f, alpha(kNeon, 0.8f));
+		const D2D1_COLOR_F lamp = D2D1::ColorF(1, 196 / 255.0f, 64 / 255.0f), rim = D2D1::ColorF(230 / 255.0f, 160 / 255.0f, 20 / 255.0f);
+		const D2D1_POINT_2F lc = D2D1::Point2F(x + 18 + 17, at + 20 + 17);
+		fillCircle(rt, lc, 17, alpha(lamp, 0.18f));
+		glow(rt, D2D1::RectF(lc.x - 9, lc.y - 9, lc.x + 9, lc.y + 9), 9, alpha(lamp, 0.8f), 8);
+		fillCircle(rt, lc, 9, lamp);
+		ID2D1SolidColorBrush* b = nullptr;
+		if (SUCCEEDED(rt->CreateSolidColorBrush(rim, &b))) {
+			rt->DrawEllipse(D2D1::Ellipse(lc, 8, 8), b, 2);
+			b->Release();
+		}
+		text(rt, quote, textX, at + 18, noteSize, kNormal, kPrimary, textW);
+		text(rt, std::string("— ") + privacy::kSignature, textX, at + 18 + nh + 10, 12, kNormal, kSecondary);
+	}
+	at += cardH + gap;
+
+	if (!a.choosing) {
+		const float bw = (w - 14) / 2;
+		const D2D1_RECT_F yes = D2D1::RectF(x, at, x + bw, at + 40), no = D2D1::RectF(x + bw + 14, at, x + w, at + 40);
+		if (rt) {
+			choiceButton(rt, yes, privacy::kYes, a.answered == privacy::Choice::Yes, panel.hot == kAskYes);
+			choiceButton(rt, no, privacy::kNo, a.answered == privacy::Choice::No, panel.hot == kAskNo);
+		}
+		askHit(panel, a, yes, kAskYes);
+		askHit(panel, a, no, kAskNo);
+		at += 40;
+	} else {
+		// The two switches, then Continue with These.
+		const bool crashOk = privacy::crashOffered(), usageOk = privacy::usageOffered();
+		const std::string crashLine = crashOk ? "Where it went wrong, if CedarLogic crashes."
+		                            : privacy::crashPolicyOff() ? "Turned off on this PC by its administrator." : "Not in this build.";
+		const std::string usageLine = usageOk ? "How often it's open and for how long, and which features are used."
+		                                      : "Turned off on this PC by its administrator.";
+		const float rowW = std::min(w, 520.0f);
+		struct Row { const char* title; const std::string* line; bool on, ok; int id; };
+		const Row rows[] = { { "Send crash reports", &crashLine, a.crash && crashOk, crashOk, kAskCrash },
+		                     { "Send anonymous usage stats", &usageLine, a.usage && usageOk, usageOk, kAskUsage } };
+		for (const Row& r : rows) {
+			float h;
+			if (rt) h = switchRow(rt, panel, x, at, rowW, r.title, *r.line, r.on, r.ok, r.id);
+			else h = 22 + text(nullptr, *r.line, 0, 0, 11.5f, kNormal, kSecondary, rowW - 54);
+			if (r.ok) {
+				a.rects[r.id - kAskYes] = D2D1::RectF(x, at - 4, x + rowW, at + h + 4);
+				a.drawn[r.id - kAskYes] = true;
+			}
+			at += h + 10;
+		}
+		const D2D1_RECT_F go = D2D1::RectF(x, at + 2, x + 260, at + 42);
+		if (rt) choiceButton(rt, go, "Continue with these", a.answered == privacy::Choice::Custom, panel.hot == kAskContinue);
+		askHit(panel, a, go, kAskContinue);
+		at += 42;
+	}
+	at += gap;
+
+	// "Choose what to send" (or back to "Just yes or no") and "See exactly
+	// what's sent", each with its icon (MDL2: an equalizer, a chevron, a magnifier).
+	const std::string choose = a.choosing ? "Just yes or no" : "Choose what to send";
+	const std::string sent = "See exactly what's sent";
+	const float cw = 20 + textWidth(choose, 12.5f, kSemi), sw = 20 + textWidth(sent, 12.5f, kSemi);
+	const D2D1_RECT_F chooseR = D2D1::RectF(x, at - 3, x + cw + 4, at + 19), sentR = D2D1::RectF(chooseR.right + 18, at - 3, chooseR.right + 22 + sw, at + 19);
+	if (rt) {
+		const D2D1_COLOR_F lit = D2D1::ColorF(0.55f, 1, 0.7f);
+		drawIcon(rt, a.choosing ? (wchar_t)0xE70E : (wchar_t)0xE9E9, D2D1::RectF(chooseR.left, at - 1, chooseR.left + 16, at + 17), 11,
+		         panel.hot == kAskChoose ? lit : kNeon);
+		text(rt, choose, chooseR.left + 20, at, 12.5f, kSemi, panel.hot == kAskChoose ? lit : kNeon);
+		drawIcon(rt, (wchar_t)0xE721, D2D1::RectF(sentR.left, at - 1, sentR.left + 16, at + 17), 11, panel.hot == kAskSent ? lit : kNeon);
+		text(rt, sent, sentR.left + 20, at, 12.5f, kSemi, panel.hot == kAskSent ? lit : kNeon);
+	}
+	askHit(panel, a, chooseR, kAskChoose);
+	askHit(panel, a, sentR, kAskSent);
+	at += 18 + 10;
+	at += text(rt, privacy::kLater, x, at, 11.5f, kNormal, kFaint, w);
+	return at - y;
+}
+
+// A click on the question: true when it was one of its controls. An answer
+// goes to `done` (choice, crash reports, usage stats).
+bool askClick(Ask& a, int id, HWND owner, const std::function<void(privacy::Choice, bool, bool)>& done) {
+	switch (id) {
+	case kAskYes: done(privacy::Choice::Yes, true, true); return true;
+	case kAskNo: done(privacy::Choice::No, privacy::crashAllowed() == 1, false); return true;
+	case kAskChoose:
+		a.choosing = !a.choosing;
+		for (bool& d : a.drawn) d = false;
+		return true;
+	case kAskSent: privacy::showWhatsSent(owner); return true;
+	case kAskCrash: if (privacy::crashOffered()) a.crash = !a.crash; return true;
+	case kAskUsage: if (privacy::usageOffered()) a.usage = !a.usage; return true;
+	case kAskContinue: done(privacy::Choice::Custom, a.crash, a.usage); return true;
+	default: return false;
+	}
+}
+
+
 }  // namespace
 
 // ---- The welcome ------------------------------------------------------------------
@@ -448,10 +622,12 @@ namespace welcome {
 namespace {
 
 enum { kSkip = 1, kBack, kNext, kJustStart, kTheme0 = 10, kSwatch0 = 20, kGrid0 = 40, kReady0 = 50 };
-const int kPages = 6;
+const int kPages = 7;
 const float kWW = 780, kWH = 580;
-// The pages: what it is, making it yours, the Actions panel, your name, six keys, and what next.
-enum { kPageIntro, kPageSetup, kPageActions, kPageName, kPageKeys, kPageReady };
+// The pages: what it is, making it yours, the Actions panel, your name, six
+// keys, "A small favour" (crash reports and usage stats, asked once:
+// Privacy.h; a choice has to be made to go on), and what next.
+enum { kPageIntro, kPageSetup, kPageActions, kPageName, kPageKeys, kPagePrivacy, kPageReady };
 const int kAccentOrder[] = { 6, 0, 1, 2, 3, 4, 5 };
 const char* kAccentNames[] = { "Blue", "Purple", "Pink", "Orange", "Green", "Graphite", "CedarLogic" };
 
@@ -476,6 +652,7 @@ struct Welcome {
 	HFONT nameFont = nullptr;
 	HBRUSH nameBrush = nullptr;
 	D2D1_RECT_F nameBox{};
+	Ask ask;   // "A small favour"
 };
 Welcome* g_welcome = nullptr;
 
@@ -506,11 +683,15 @@ void finish(int then = 0, showme::WelcomeExit exit = showme::WelcomeExit::Skip) 
 	const bool walk = showme::welcomeClosed(exit);
 	if (then == CMD_TOUR) { if (!walk) startTourFrom(window); }
 	else if (then) PostMessageW(window->window(), WM_COMMAND, then, 0);
+	// Skipped before "A small favour": asked once more, over the circuit.
+	privacy::askWhenReady();
 }
 
 void go(int d) {
 	Welcome* w = g_welcome;
 	if (w == nullptr) return;
+	// Past "A small favour" only with an answer.
+	if (d > 0 && w->pager.page == kPagePrivacy && w->ask.answered == privacy::Choice::None) return;
 	const int to = std::max(0, std::min(kPages - 1, w->pager.page + d));
 	if (to == w->pager.page) return;
 	w->pager.go(to);
@@ -694,12 +875,26 @@ void pageReady(ID2D1RenderTarget* rt, Welcome* w, double t) {
 	     y + 4, 11.5f, kNormal, kFaint, kWW - 136);
 }
 
+// "A small favour": the question; going on takes an answer.
+void pagePrivacy(ID2D1RenderTarget* rt, Welcome* w) { paintAsk(rt, w->panel, w->ask, 56, 28, kWW - 112, false); }
+
+// The answer: kept, the button ticked, and on to the last page.
+void answerPrivacy(privacy::Choice c, bool crash, bool usage) {
+	Welcome* w = g_welcome;
+	if (w == nullptr) return;
+	privacy::answer(c, crash, usage);
+	w->ask.answered = c;
+	w->panel.redraw();
+	SetTimer(w->panel.hwnd, 2, 250, nullptr);
+}
+
 void paint(ID2D1RenderTarget* rt, float w, float h) {
 	Welcome* wl = g_welcome;
 	if (wl == nullptr) return;
 	const double t = nowSeconds() - wl->opened;
 	ground(rt, w, h);
 	const float footer = h - 74;
+	for (bool& d : wl->ask.drawn) d = false;
 	wl->pager.draw(rt, wl->panel, D2D1::RectF(0, 0, w, footer - 1), [&](int pg) {
 		switch (pg) {
 		case kPageIntro: pageIntro(rt, t); break;
@@ -707,9 +902,12 @@ void paint(ID2D1RenderTarget* rt, float w, float h) {
 		case kPageActions: pageActions(rt, wl->panel); break;
 		case kPageName: pageName(rt, wl); break;
 		case kPageKeys: pageKeys(rt, wl); break;
+		case kPagePrivacy: pagePrivacy(rt, wl); break;
 		default: pageReady(rt, wl, t); break;
 		}
 	});
+	if (wl->pager.page != kPagePrivacy || wl->pager.sliding())
+		for (bool& d : wl->ask.drawn) d = false;
 	const int page = wl->pager.page;
 	// The name's box, once its page has landed.
 	if (page == kPageName && !wl->pager.sliding() && wl->name) {
@@ -717,7 +915,9 @@ void paint(ID2D1RenderTarget* rt, float w, float h) {
 		const int x = scaled((int)wl->nameBox.left + 13, dpi), y = scaled((int)wl->nameBox.top + 9, dpi);
 		SetWindowPos(wl->name, HWND_TOP, x, y, scaled(274, dpi), scaled(22, dpi), SWP_NOACTIVATE | SWP_SHOWWINDOW);
 	}
-	if (page < kPages - 1) {
+	// (No Skip on "A small favour": its own two buttons go on.)
+	const bool mustAnswer = page == kPagePrivacy && wl->ask.answered == privacy::Choice::None;
+	if (page < kPages - 1 && page != kPagePrivacy) {
 		const D2D1_RECT_F skip = D2D1::RectF(w - 26 - 44, 18, w - 26, 40);
 		text(rt, "Skip", skip.left, skip.top, 12.5f, kMedium, wl->panel.hot == kSkip ? alpha(kPrimary, 0.7f) : kFaint, skip.right - skip.left,
 		     DWRITE_TEXT_ALIGNMENT_TRAILING);
@@ -727,9 +927,14 @@ void paint(ID2D1RenderTarget* rt, float w, float h) {
 	dots(rt, 44, footer + 37, kPages, page);
 	float x = w - 44;
 	const D2D1_RECT_F next = page < kPages - 1 ? D2D1::RectF(x - 142, footer + 19, x, footer + 55) : D2D1::RectF(x - 110, footer + 19, x, footer + 55);
-	button(rt, next, page == 0 ? "Get Started" : page < kPages - 1 ? "Continue" : "Just Start", page < kPages - 1,
-	       wl->panel.hot == (page < kPages - 1 ? kNext : kJustStart));
-	wl->panel.addHit(next, page < kPages - 1 ? kNext : kJustStart);
+	if (mustAnswer) {
+		// No Continue here: the page's own two buttons go on.
+		text(rt, "Choose one to go on", next.left - 20, footer + 29, 12, kNormal, kFaint, next.right - next.left + 20, DWRITE_TEXT_ALIGNMENT_TRAILING);
+	} else {
+		button(rt, next, page == 0 ? "Get Started" : page < kPages - 1 ? "Continue" : "Just Start", page < kPages - 1,
+		       wl->panel.hot == (page < kPages - 1 ? kNext : kJustStart));
+		wl->panel.addHit(next, page < kPages - 1 ? kNext : kJustStart);
+	}
 	if (page > 0) {
 		const D2D1_RECT_F back = D2D1::RectF(next.left - 8 - 96, footer + 19, next.left - 8, footer + 55);
 		button(rt, back, "Back", false, wl->panel.hot == kBack);
@@ -740,6 +945,10 @@ void paint(ID2D1RenderTarget* rt, float w, float h) {
 void click(int id) {
 	Welcome* w = g_welcome;
 	if (w == nullptr) return;
+	if (w->pager.page == kPagePrivacy && !w->pager.sliding() && askClick(w->ask, id, w->panel.hwnd, answerPrivacy)) {
+		if (g_welcome) g_welcome->panel.redraw();
+		return;
+	}
 	if (id == kSkip) finish();
 	else if (id == kJustStart) finish(0, showme::WelcomeExit::Blank);
 	else if (panelClick(id)) {}
@@ -762,6 +971,11 @@ bool key(UINT vk) {
 	Welcome* w = g_welcome;
 	if (w == nullptr) return false;
 	const bool last = w->pager.page == kPages - 1;
+	// Escape on "A small favour", unanswered: No thanks.
+	if (vk == VK_ESCAPE && w->pager.page == kPagePrivacy && w->ask.answered == privacy::Choice::None) {
+		answerPrivacy(privacy::Choice::No, privacy::crashAllowed() == 1, false);
+		return true;
+	}
 	switch (vk) {
 	case VK_ESCAPE: finish(); return true;
 	case VK_RETURN: if (last) readyAction(w->readyChoice); else go(1); return true;
@@ -798,6 +1012,8 @@ bool show(CircuitWindow* window) {
 	g_welcome = new Welcome();
 	Welcome* w = g_welcome;
 	w->window = window;
+	w->ask.reset();
+	if (privacy::asked()) w->ask.answered = privacy::choice() == privacy::Choice::None ? privacy::Choice::Custom : privacy::choice();
 	Panel& p = w->panel;
 	p.paint = paint;
 	p.click = click;
@@ -811,11 +1027,18 @@ bool show(CircuitWindow* window) {
 		const int pg = wl->pager.page;
 		bool lit = false;
 		for (double at : wl->pressedAt) lit = lit || nowSeconds() - at < 0.8;
-		return wl->pager.sliding() || pg == kPageIntro || pg == kPageReady || lit;
+		return wl->pager.sliding() || pg == kPageIntro || pg == kPageReady || lit || (pg == kPagePrivacy && askAnimating(wl->ask));
 	};
 	p.message = [](UINT msg, WPARAM wp, LPARAM lp, LRESULT& r) {
 		Welcome* wl = g_welcome;
 		if (wl == nullptr) return false;
+		// "A small favour" answered: a moment, then on.
+		if (msg == WM_TIMER && wp == 2) {
+			KillTimer(wl->panel.hwnd, 2);
+			go(1);
+			r = 0;
+			return true;
+		}
 		// Alt+F4 is Skip: the circuit window comes back.
 		if (msg == WM_CLOSE) { finish(); r = 0; return true; }
 		if (msg == WM_CTLCOLOREDIT && (HWND)lp == wl->name) {
@@ -1805,3 +2028,174 @@ bool isOpen() { return g_about != nullptr; }
 void closeNow() { close(0); }
 
 }  // namespace about
+
+// ---- "A small favour", for updaters ------------------------------------------------
+// The welcome's question as a sheet over the circuit window (Privacy.h), in
+// the brand's look: 640 points wide and as tall as the taller of its two
+// ways, measured before it goes up, so nothing in it resizes the window.
+
+namespace privacy {
+
+namespace {
+
+struct Sheet {
+	Panel panel;
+	Ask ask;
+	CircuitWindow* window = nullptr;
+};
+Sheet* g_sheet = nullptr;
+Sheet* g_sheetGone = nullptr;   // destroyed with its window: freed at the next presentSheet()
+const float kSheetW = 640, kSheetPadX = 36, kSheetPadY = 30;
+
+// Someone who'd said yes to crash reports before is told so above it.
+bool crashAlreadyOn() { return crashAllowed() == 1 && crashOffered(); }
+
+float sheetHeight() {
+	Panel measure;
+	Ask a;
+	a.reset();
+	float h = 0;
+	for (bool switches : { false, true }) {
+		a.choosing = switches;
+		h = std::max(h, paintAsk(nullptr, measure, a, kSheetPadX, 0, kSheetW - 2 * kSheetPadX, true));
+	}
+	return std::ceil(kSheetPadY + (crashAlreadyOn() ? 24 : 0) + h + kSheetPadY);
+}
+
+void sheetAnswered(Choice c, bool crash, bool usage) {
+	answer(c, crash, usage);
+	closeSheet();
+	// Show Me Around follows, the first time.
+	showme::startWhenReady();
+}
+
+}  // namespace
+
+bool sheetOpen() { return g_sheet != nullptr; }
+
+void presentSheet(CircuitWindow* over) {
+	if (over == nullptr || g_sheet || !windowAlive(over)) return;
+	delete g_sheetGone;
+	g_sheetGone = nullptr;
+	g_sheet = new Sheet();
+	g_sheet->window = over;
+	g_sheet->ask.reset();
+	Panel& p = g_sheet->panel;
+	p.paint = [](ID2D1RenderTarget* rt, float w, float h) {
+		Sheet* s = g_sheet;
+		if (s == nullptr) return;
+		ground(rt, w, h, 0.5f, 0.0f);
+		float y = kSheetPadY;
+		if (crashAlreadyOn()) {
+			glyph(rt, 0xE73E, kSheetPadX - 2, y - 1, 9, kSecondary);
+			text(rt, "Crash reports are on, as you chose before. This adds usage stats, if you'd like.", kSheetPadX + 18, y, 11.5f, kNormal,
+			     kSecondary, w - 2 * kSheetPadX - 18);
+			y += 24;
+		}
+		for (bool& d : s->ask.drawn) d = false;
+		paintAsk(rt, s->panel, s->ask, kSheetPadX, y, w - 2 * kSheetPadX, true);
+	};
+	p.click = [](int id) {
+		Sheet* s = g_sheet;
+		if (s == nullptr) return;
+		askClick(s->ask, id, s->panel.hwnd, sheetAnswered);
+		if (g_sheet) g_sheet->panel.redraw();
+	};
+	// Escape (and Alt+F4) is No thanks.
+	p.key = [](UINT vk) {
+		if (vk != VK_ESCAPE || g_sheet == nullptr) return false;
+		sheetAnswered(Choice::No, crashAllowed() == 1, false);
+		return true;
+	};
+	p.message = [](UINT msg, WPARAM, LPARAM, LRESULT& r) {
+		if (msg != WM_CLOSE || g_sheet == nullptr) return false;
+		sheetAnswered(Choice::No, crashAllowed() == 1, false);
+		r = 0;
+		return true;
+	};
+	p.animating = [] { return g_sheet && askAnimating(g_sheet->ask); };
+	p.gone = [] {
+		// Its circuit window went (and took this with it).
+		g_sheetGone = g_sheet;
+		g_sheet = nullptr;
+	};
+	const RECT r = centeredOn(over->window(), (int)kSheetW, (int)sheetHeight());
+	p.create(over->window(), r.right - r.left, r.bottom - r.top, r.left, r.top);
+	EnableWindow(over->window(), FALSE);
+	ShowWindow(p.hwnd, SW_SHOWNORMAL);
+	SetForegroundWindow(p.hwnd);
+	SetFocus(p.hwnd);
+}
+
+void closeSheet() {
+	Sheet* s = g_sheet;
+	if (s == nullptr) return;
+	g_sheet = nullptr;
+	CircuitWindow* w = windowAlive(s->window) ? s->window : nullptr;
+	if (w) EnableWindow(w->window(), TRUE);
+	s->panel.destroy();
+	delete s;
+	if (w) SetForegroundWindow(w->window());
+}
+
+namespace {
+// The question showing now: the sheet, or the welcome on its page (landed).
+bool showing(Ask*& a, Panel*& p) {
+	if (g_sheet && g_sheet->panel.hwnd) {
+		a = &g_sheet->ask;
+		p = &g_sheet->panel;
+		return true;
+	}
+	welcome::Welcome* w = welcome::g_welcome;
+	if (w && w->panel.hwnd && w->pager.page == welcome::kPagePrivacy && !w->pager.sliding()) {
+		a = &w->ask;
+		p = &w->panel;
+		return true;
+	}
+	return false;
+}
+}  // namespace
+
+HWND askWindow() {
+	Ask* a = nullptr;
+	Panel* p = nullptr;
+	return showing(a, p) ? p->hwnd : nullptr;
+}
+
+bool controlRect(Control c, RECT& screen) {
+	Ask* a = nullptr;
+	Panel* p = nullptr;
+	if (!showing(a, p)) return false;
+	const int i = (int)c;
+	if (i < 0 || i >= kAskEnd - kAskYes || !a->drawn[i]) return false;
+	const double s = dpiOf(p->hwnd) / 96.0;
+	const D2D1_RECT_F& r = a->rects[i];
+	POINT tl = { (LONG)std::lround(r.left * s), (LONG)std::lround(r.top * s) }, br = { (LONG)std::lround(r.right * s), (LONG)std::lround(r.bottom * s) };
+	ClientToScreen(p->hwnd, &tl);
+	ClientToScreen(p->hwnd, &br);
+	screen = RECT{ tl.x, tl.y, br.x, br.y };
+	return true;
+}
+
+bool choosing() {
+	Ask* a = nullptr;
+	Panel* p = nullptr;
+	return showing(a, p) && a->choosing;
+}
+
+bool switchState(bool crash) {
+	Ask* a = nullptr;
+	Panel* p = nullptr;
+	if (!showing(a, p)) return false;
+	return crash ? a->crash : a->usage;
+}
+
+void setChoosing(bool on) {
+	Ask* a = nullptr;
+	Panel* p = nullptr;
+	if (!showing(a, p)) return;
+	a->choosing = on;
+	p->redraw();
+}
+
+}  // namespace privacy

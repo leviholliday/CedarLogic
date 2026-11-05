@@ -1,6 +1,7 @@
 // Show Me Around (see ShowMeAround.h).
 
 #include "ShowMeAround.h"
+#include "Privacy.h"
 #include "Brand.h"
 #include "Chrome.h"
 #include "Commands.h"
@@ -896,6 +897,8 @@ void stopWatching() {
 
 CircuitWindow* readyWindow() {
 	if (splash::active() || intro::active() || welcome::isOpen() || whatsnew::isOpen() || welcome::tourWindow()) return nullptr;
+	// The privacy question (Privacy.h), if it's owed, comes first.
+	if (privacy::holdsShowMeAround()) return nullptr;
 	CircuitWindow* w = frontWindow();
 	if (!w) return nullptr;
 	HWND h = w->window();

@@ -194,6 +194,40 @@ Updates from inside the app replace `CedarLogic.exe` and
 `res` where they are. Windows SmartScreen warns about both until they're
 signed: More info, then Run anyway.
 
+## Crash reports and usage stats
+
+Both off until the person says yes, asked once (`docs/PRIVACY.md` has every
+detail, and the same words): "A small favour", page 6 of the first-run
+welcome, or for an update a sheet over the circuit window after What's New
+and before Show Me Around (`App/Privacy.h`; drawn in `App/Welcome.cpp`), and
+Settings > Privacy after that. A lab turns either off with a DWORD of 1 under
+`HKLM\Software\Policies\CedarLogic`: `DisableCrashReporting`,
+`DisableUsageStats`.
+
+- Usage stats (`App/UsageReport.h`, the engine; `App/UsageStats.h`, the
+  counting): POST `https://cedarlogic.netlify.app/api/usage` at most once a day
+  at launch, from a thread of its own, with WinHTTP over HTTPS, to the
+  contract the site implements (snapshot, delta or ping; `platform` `windows`).
+  The allowlist uses the Mac's setting names. What's counted is in
+  `%APPDATA%\CedarLogic\Usage\usage.json`, only the user's.
+- Crash reports (`App/CrashReports.h`): sentry-native, built by CI from a
+  pinned release (CMake's `CL_SENTRY_DIR` names it; nothing is kept in git),
+  its in-process backend, into the Mac's Sentry project (`CL_SENTRY_DSN`). A
+  build without it says "Not in this build". Each report is cleaned of the
+  user name, the PC's name and the profile folder before it goes. Nothing is
+  shipped beside the exe for it (the in-process backend has no handler exe),
+  and CI keeps each build's `CedarLogic.pdb` as an artifact for reading the
+  addresses in a report.
+- Never in a test or picture run, in CI, or with `CEDARLOGIC_HOME` or a `CL_`
+  variable set. The checks: `--usage-check` (`CL_USAGE_URL` at
+  `mac/Tools/usage-check/server.py`), `--usage-live` (`CL_USAGE_URL` at the
+  site's draft), `--crash-check`, and `--privacy-check` (the welcome's page and
+  the sheet in real windows, answered with real clicks and keys; with
+  `CL_EXPECT_POLICY=1` under the policy keys). `--dialog privacy-sheet`,
+  `--dialog whats-sent`, `--dialog welcome --page 5` and `--dialog preferences
+  --page 7` (and `--privacy-choose` for the two switches) are CI's pictures.
+  `CL_TEST_CRASH=1` crashes a copy that has crash reports on, 4 s in.
+
 ## Sync
 
 Your Circuits on every device (design: `docs/SYNC.md`). Settings > Sync turns

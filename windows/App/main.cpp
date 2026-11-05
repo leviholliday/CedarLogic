@@ -7,6 +7,7 @@
 #include "Alert.h"
 #include "Canvas.h"
 #include "Collections.h"
+#include "CrashReports.h"
 #include "Dialogs.h"
 #include "DragLog.h"
 #include "Feedback.h"
@@ -17,6 +18,8 @@
 #include "Intro.h"
 #include "Library.h"
 #include "Palette.h"
+#include "Privacy.h"
+#include "PrivacyCheck.h"
 #include "Rail.h"
 #include "RailCheck.h"
 #include "Recovery.h"
@@ -29,6 +32,7 @@
 #include "TabSwitcher.h"
 #include "Toolbar.h"
 #include "Updater.h"
+#include "UsageStats.h"
 #include "ShowMeAround.h"
 #include "Welcome.h"
 #include "Window.h"
@@ -107,6 +111,9 @@ int gToolbarStyle = -1; // --toolbar-style classic|seamless|minimal: the toolbar
 std::string gRail, gRailLabel;
 bool gRailCheck = false;   // --rail-check (RailCheck.h)
 int gRailExit = 0;
+bool gPrivacyCheck = false;   // --privacy-check (PrivacyCheck.h)
+int gPrivacyExit = 0;
+bool gPrivacyChoose = false;  // --privacy-choose: the question's two switches showing (pictures)
 
 // --session-check [actions] [seed]: a long random session in one window
 // (SessionCheck.h).
@@ -236,6 +243,20 @@ void CALLBACK railCheckTimer(HWND, UINT, UINT_PTR id, DWORD) {
 	gRailExit = railcheck::run([](const std::string& s) { writeOut(s); });
 	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
 	PostQuitMessage(gRailExit);
+}
+
+// --privacy-check: the consent in real windows, with real input (PrivacyCheck.h).
+void CALLBACK privacyCheckTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	gPrivacyExit = privacycheck::consentCheck([](const std::string& s) { writeOut(s); });
+	for (CircuitWindow* c : std::vector<CircuitWindow*>(circuitWindows())) c->destroy();
+	PostQuitMessage(gPrivacyExit);
+}
+
+// --dialog whats-sent: "See exactly what's sent" over the window, for the picture.
+void CALLBACK whatsSentTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	KillTimer(nullptr, id);
+	if (!circuitWindows().empty()) privacy::showWhatsSent(circuitWindows().back()->window());
 }
 
 // --dialog show-me-around [--page N]: Show Me Around on the window at stop N
@@ -1102,6 +1123,20 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			return feedback::serverCheck([](const std::string& s) { writeOut(s); }) == 0 ? 0 : 1;
 		}
 		if (a == "--version") { writeOut("CedarLogic " CL_VERSION " (native Windows)\n"); return 0; }
+		// Usage stats and crash reports (docs/PRIVACY.md, PrivacyCheck.h), each
+		// in a home folder of its own.
+		if (a == "--usage-check" || a == "--usage-live" || a == "--crash-check") {
+			privacycheck::prepare(a == "--crash-check" ? "crash" : "usage");
+			prefs().load();
+			usagestats::testRun = true;
+			const auto out = [](const std::string& s) { writeOut(s); };
+			const int code = a == "--usage-check" ? privacycheck::usageCheck(out) : a == "--usage-live" ? privacycheck::usageLive(out)
+			                                                                                          : crashreports::selfTest(out);
+			privacycheck::cleanUp();
+			return code;
+		}
+		if (a == "--privacy-check") { gPrivacyCheck = true; continue; }
+		if (a == "--privacy-choose") { gPrivacyChoose = true; continue; }
 		if (a == "--start-menu-test") {
 			std::string report;
 			const bool ok = integration::selfTest(report);
@@ -1245,7 +1280,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			        : d == "feedback" ? CMD_FEEDBACK : d == "help" ? -3 : d == "quit" ? CMD_QUIT : d == "gate-settings" ? CMD_GATE_SETTINGS
 			        : d == "rename" ? -6 : d == "alert" ? -5 : d == "about" ? CMD_ABOUT : d == "start-menu" ? -7 : d == "bad-link" ? -8
 			        : d == "welcome" ? -1 : d == "whatsnew" ? -2 : d == "tour" ? -4 : d == "switcher" ? -10
-			        : d == "customize-actions" ? CMD_CUSTOMIZE_ACTIONS : d == "show-me-around" ? -12 : d == "whatsnew-panel" ? -13 : 0;
+			        : d == "customize-actions" ? CMD_CUSTOMIZE_ACTIONS : d == "show-me-around" ? -12 : d == "whatsnew-panel" ? -13
+			        : d == "privacy-sheet" ? -14 : d == "whats-sent" ? -15 : 0;
 			if (d == "feedback-sending" || d == "feedback-failed" || d == "feedback-sent" || d == "feedback-capped" || d == "feedback-summary") {
 				gDialog = -11;
 				gFeedbackSample = d == "feedback-sending" ? 1 : d == "feedback-failed" ? 2 : d == "feedback-sent" ? 3 : d == "feedback-capped" ? 4 : 5;
@@ -1268,11 +1304,16 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	}
 	// Test runs (CI's pictures, the click test) are CedarLogics of their own.
 	const bool testRun = !gScreenshot.empty() || !gSplashFile.empty() || !gReportIn.empty() || !gExportIn.empty() || gClickTest || gDialog != 0 || gDragSelfTest || gBenchDraw > 0 || gSessionCheck ||
-	                     gMenuTest || !gFeedbackTest.empty() || !gRenderIntro.empty() || gRailCheck;
+	                     gMenuTest || !gFeedbackTest.empty() || !gRenderIntro.empty() || gRailCheck || gPrivacyCheck;
 	// Its own home folder (so not your settings or Your Circuits), and its crash handlers, before anything is read.
 	if (gSessionCheck) sessioncheck::prepare(gSessionSeed);
 	if (gRailCheck) railcheck::prepare();
+	if (gPrivacyCheck) privacycheck::prepare("privacy");
 	gTestRun = testRun;
+	// Test and picture runs send no usage stats (only a check, to a stand-in
+	// it names) and never ask the privacy question by themselves.
+	usagestats::testRun = testRun;
+	privacy::quiet = testRun;
 	// Test and picture runs: the panel doesn't follow wherever the runner's
 	// pointer is, and Show Me Around never starts by itself.
 	if (testRun) {
@@ -1286,6 +1327,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 
 	prefs().load();
 	gPrefsBefore = prefs();
+	// Crash reports, if they were said yes to: before anything else can go wrong.
+	crashreports::start(testRun);
 	if (!gRenderIntro.empty()) {
 		// The intro's pictures go into a new circuit's window, dark, the
 		// size of the pictures (as the Mac's --render-intro).
@@ -1331,7 +1374,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	ActionsRail::picture.label = gRailLabel;
 	applyTheme();
 	// Not for --screenshot: CI wants one deterministic frame.
-	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && gExportIn.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck && !gMenuTest && gFeedbackTest.empty() && gRenderIntro.empty() && !gRailCheck) splash::show();
+	if (gScreenshot.empty() && gSplashFile.empty() && gReportIn.empty() && gExportIn.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck && !gMenuTest && gFeedbackTest.empty() && gRenderIntro.empty() && !gRailCheck && !gPrivacyCheck) splash::show();
 	splash::setStatus("Loading the gate library\u2026");
 	const std::string lib = resourcesDir().empty() ? std::string() : resourcesDir() + "\\cl_gatedefs.xml";
 	if (lib.empty() || !cl_library_load(lib.c_str())) {
@@ -1387,7 +1430,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	// Nothing asked for: the circuit you were last in, as the wx and Mac apps
 	// do; else the most recent one; else a new circuit.
 	if (!any && circuitWindows().empty() && gScreenshot.empty() && !gClickTest && !gDragSelfTest && gBenchDraw == 0 && !gSessionCheck && !gMenuTest && gFeedbackTest.empty() &&
-	    gRenderIntro.empty() && !gRailCheck) {
+	    gRenderIntro.empty() && !gRailCheck && !gPrivacyCheck) {
 		std::string last = library::lastCircuit();
 		if (last.empty() || !fileExists(last)) {
 			const std::vector<library::Item> all = library::items();
@@ -1444,7 +1487,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 		prefs().hasSeenWelcome = false;
 		welcome::offer(circuitWindows().back());
 		welcome::pageForScreenshot(gPage);
+		if (gPrivacyChoose) privacy::setChoosing(true);
 	}
+	if (gDialog == -14 && !circuitWindows().empty()) {
+		privacy::presentSheet(circuitWindows().back());
+		if (gPrivacyChoose) privacy::setChoosing(true);
+	}
+	if (gDialog == -15) SetTimer(nullptr, 0, 400, whatsSentTimer);
 	if (gDialog == -4 && !circuitWindows().empty()) welcome::startTour(circuitWindows().back());
 	if (gDialog == -12) SetTimer(nullptr, 0, 900, showMeAroundTimer);
 	if (gDialog == -13) SetTimer(nullptr, 0, 900, panelCardTimer);
@@ -1464,6 +1513,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	else if (!gRenderIntro.empty()) SetTimer(nullptr, 0, 2000, renderIntroTimer);
 	else if (gMenuTest) SetTimer(nullptr, 0, 500, menuTestTick);
 	else if (gRailCheck) SetTimer(nullptr, 0, 500, railCheckTimer);
+	else if (gPrivacyCheck) SetTimer(nullptr, 0, 500, privacyCheckTimer);
 	else if (!gFeedbackTest.empty()) SetTimer(nullptr, 0, 1500, feedbackTestStart);
 	else if (gClickTest) {
 		SetTimer(nullptr, 0, 1500, clickTestStart);
@@ -1482,6 +1532,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 			CircuitWindow* front = circuitWindows().empty() ? nullptr : circuitWindows().front();
 			if (!welcome::offer(front) && !whatsnew::offer(front))
 				SetTimer(nullptr, 0, 300, recoveryTimer);
+			// Crash reports and usage stats, asked once (Privacy.h): for anyone
+			// past the welcome who hasn't been, as a sheet over the circuit once
+			// it has the keys (after What's New, before Show Me Around).
+			privacy::askWhenReady();
+			// Usage stats, if they're on: counted from here, sent in the background.
+			usagestats::start();
 			updater::start();
 			integration::start();
 			// Sync starts looking after Your Circuits; a link it was opened with asks first.
@@ -1515,11 +1571,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 	draglog::close();
 	updater::shutdown();
 	syncapp::shutdown();
+	usagestats::shutdown();
+	crashreports::shutdown();
 	restoreRunPrefs();
 	prefs().save();
 	OleUninitialize();
 	if (gClickTest) return clickResult;
 	if (gRailCheck) return gRailExit;
+	if (gPrivacyCheck) {
+		privacycheck::cleanUp();
+		return gPrivacyExit;
+	}
 	if (gSessionCheck) {
 		prefs() = gPrefsBefore;
 		return sessioncheck::exitCode();
