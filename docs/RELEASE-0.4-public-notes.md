@@ -3,11 +3,6 @@ The notes for the v0.4 release page in leviholliday/CedarLogic-Releases, for
 Mac, Windows and Linux (go-list step 5: scripts/release-assets.sh sets them,
 without this comment). Made from docs/RELEASE-0.4-notes.md sections 1 and 2.
 
-TODO-OWNER: the Actions panel and Show Me Around lines describe the Actions
-panel change ("Show the Actions panel" on for everyone, "Open on hover", the
-setup step, Help > Show Me Around). Check them against the build you release,
-then delete this TODO-OWNER paragraph. scripts/release-assets.sh --go refuses
-while it's here.
 -->
 # CedarLogic 0.4
 
@@ -52,9 +47,10 @@ Every installer checks CedarLogic's signature before it installs anything, and C
 
 ### On every computer
 
-- **An intro.** The first time CedarLogic opens, and after an update, the circuit draws itself and the light comes on. Any key or click skips it; Help › Play the Intro plays it again.
-- **The Actions panel.** The commands you use most, as buttons down the window's right edge. Drag them into your own order, or search every menu command in Customize. Turn it off in Settings, or have it open when the pointer reaches the edge.
-- **Help › Show Me Around.** A short guided walk around the window, any time.
+- **An intro.** Every time CedarLogic opens, a short intro draws the circuit and lights it up (about three and a half seconds, silent). The first launch and the first after an update play a longer one with a chime. Any key or click skips it. In Settings › General, "When CedarLogic opens" picks Short intro, Full intro, Classic launch screen or None, and Help › Play the Intro plays it again.
+- **The Actions panel.** The commands you use most, as buttons down the window's right edge, on for everyone. Drag them into your own order, or search every menu command in Customize. One switch in Settings › Actions turns it off, and "Open on hover" slides it out when the pointer reaches the edge (Control-Command-S on a Mac, Ctrl+B on Windows, F9 on Linux).
+- **Show Me Around.** A short guided walk around the window that starts once by itself, and any time from Help › Show Me Around. Help › Learn Logic Online opens the lessons on the website.
+- **A small favour.** CedarLogic asks once whether you'd like to send anonymous crash reports and usage stats. Both are off unless you say yes, nothing identifies you, and Settings › Privacy shows exactly what would be sent and lets you delete it.
 - **Recently Deleted.** A circuit you delete from Your Circuits waits 30 days in Recently Deleted, where you can restore it.
 - **Clear Drawing asks first**, and Undo brings it back.
 - **Steadier wires and clicks.** Clicking between close pins or dragging a wire at a corner picks the same thing every time, and Connect Nearby no longer stalls on big pages.
