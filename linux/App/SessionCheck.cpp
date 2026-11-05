@@ -1619,6 +1619,13 @@ struct SessionDriver {
 			if (c == nullptr) return;
 			GtkWidget* cw = c->widget();
 			const double W = c->width(), H = c->height();
+			// A known zoom (a part about 80 points across), wherever the view is.
+			{
+				Canvas::View v = c->view();
+				v.upp = 0.05;
+				v.needsFit = false;
+				c->setView(v);
+			}
 			auto away = [&] {
 				pointerTo(cw, W / 2, H / 2);
 				pump(60);
@@ -1684,29 +1691,29 @@ struct SessionDriver {
 			check(ok && boxed == 1 && !slid, format("a box drawn from 3 points inside the edge, leftwards round the part, selects it (%d selected)%s",
 			                                        boxed, slid ? "; the panel slid out over the drag" : "") + in);
 			away();
-			// The part pressed in the strip and dragged left: moved (through the
-			// engine) so that it reaches into the strip, then a point of it
-			// there found (the hit test a right-click uses) and pressed.
-			double px = 0, py = 0, nx = 0, ny = 0, vx = 0, vy = 0;
-			cl_gate_position(doc(), gate, &px, &py);
-			toView(c, px, py, vx, vy);
+			// A part pressed in the strip and dragged left: one put with its
+			// middle 8 points inside the edge, a point of it in the strip found
+			// (the hit test a right-click uses) and pressed there.
+			if (cl_edit_selected_gate_count(doc(), page) > 0) cl_edit_delete(doc(), page);
+			c->worldPoint(W - 8, H / 2, gx, gy);
 			cl_edit_select_none(doc(), page);
-			if (cl_edit_press(doc(), page, px, py, 0, c->unitsPerPoint()) == CL_PRESS_PART) {
-				const double tx = px + ((W - 8) - vx) * c->unitsPerPoint();
-				cl_edit_drag(doc(), tx, py);
-				cl_edit_release(doc(), tx, py);
-			}
+			const long edgeGate = cl_edit_add_gate(doc(), page, "AA_AND2", gx, gy) ? cl_edit_single_gate(doc(), page) : -1;
 			cl_edit_select_none(doc(), page);
 			c->redraw();
 			pump(150);
+			if (!check(edgeGate >= 0, "a part placed at the canvas's right edge" + in)) continue;
+			const long gateHere = edgeGate;
+			double px = 0, py = 0, nx = 0, ny = 0, vx = 0, vy = 0;
+			cl_gate_position(doc(), gateHere, &px, &py);
+			toView(c, px, py, vx, vy);
 			double hitX = -1;
 			for (double x = W - 2; x >= W - 11 && hitX < 0; x -= 1) {
 				double wx = 0, wy = 0;
 				c->worldPoint(x, vy, wx, wy);
-				if (cl_edit_context(doc(), page, wx, wy, c->unitsPerPoint()) == CL_CONTEXT_GATE && cl_edit_single_gate(doc(), page) == gate) hitX = x;
+				if (cl_edit_context(doc(), page, wx, wy, c->unitsPerPoint()) == CL_CONTEXT_GATE && cl_edit_single_gate(doc(), page) == gateHere) hitX = x;
 				cl_edit_select_none(doc(), page);
 			}
-			cl_gate_position(doc(), gate, &px, &py);
+			cl_gate_position(doc(), gateHere, &px, &py);
 			slid = false;
 			ok = hitX > 0 && pressAt(cw, hitX, vy);
 			pump(40);
@@ -1717,7 +1724,7 @@ struct SessionDriver {
 			}
 			ok = xdo({ "mouseup", "1" }) && ok;
 			pump(200);
-			cl_gate_position(doc(), gate, &nx, &ny);
+			cl_gate_position(doc(), gateHere, &nx, &ny);
 			const double moved = (px - nx) / c->unitsPerPoint();
 			check(ok && moved > 100 && !slid, format("a part pressed %.0f points inside the edge and dragged left moves with the pointer (%.0f points)%s",
 			                                         hitX > 0 ? W - hitX : -1.0, moved, slid ? "; the panel slid out over the drag" : "") + in);
@@ -1737,7 +1744,7 @@ struct SessionDriver {
 			// The part goes again.
 			cl_edit_select_none(doc(), page);
 			if (cl_edit_press(doc(), page, nx, ny, 0, c->unitsPerPoint()) == CL_PRESS_PART) cl_edit_release(doc(), nx, ny);
-			if (cl_edit_single_gate(doc(), page) == gate) cl_edit_delete(doc(), page);
+			if (cl_edit_single_gate(doc(), page) == gateHere) cl_edit_delete(doc(), page);
 			c->redraw();
 			pump(100);
 			// Folded, the tab itself still takes a click (opening the panel).

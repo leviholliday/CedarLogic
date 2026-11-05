@@ -423,8 +423,14 @@ void applyStyle() {
 			     " { background-image: none; background-color: " + css(withAlpha(c.accent(), 0.16f)) + "; color: " + css(text) + "; }\n";
 			m += all({ "row:hover label", "row:selected label", "row:active label", "row:selected image", "row:hover image" }) +
 			     " { color: " + css(text) + "; }\n";
-			m += all({ "row:selected .hint", "row:hover .hint", "row:selected .dim-label", "row:hover .dim-label" }) + " { color: " +
-			     css(dark ? rgb255(170, 176, 188) : rgb255(82, 87, 97)) + "; }\n";
+			// A row's quieter text (its menu, its shortcut) made to read on the tint too.
+			{
+				const Color hint = dark ? rgb255(170, 176, 188) : rgb255(82, 87, 97);
+				const Color chosen = mixColor(fieldFill, c.accent(), 0.16f), lit = mixColor(fieldFill, text, 0.05f);
+				m += all({ "row:selected .hint", "row:selected .dim-label", "row:active .hint" }) + " { color: " + css(readableOn(hint, chosen, 4.7)) +
+				     "; opacity: 1; }\n";
+				m += all({ "row:hover .hint", "row:hover .dim-label" }) + " { color: " + css(readableOn(hint, lit, 4.7)) + "; opacity: 1; }\n";
+			}
 		}
 	}
 	gtk_css_provider_load_from_data(stateProvider(), m.c_str(), -1, nullptr);

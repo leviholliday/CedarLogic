@@ -193,13 +193,13 @@ void checkText(GtkWidget* root, const std::string& where) {
 // The text read off the window as GTK draws it (not from the style's
 // colours alone: a dropdown's row draws its text through a node of its own,
 // which a rule can miss), with the control forced into each state a pointer
-// or a click puts it in. Drawn at twice the size, so a letter's strokes are
+// or a click puts it in. Drawn at three times the size, so a letter's strokes are
 // solid and their colour is the text's own.
 
 struct Shot {
 	cairo_surface_t* s = nullptr;
 	int w = 0, h = 0;
-	static constexpr int kScale = 2;
+	static constexpr int kScale = 3;
 	~Shot() { if (s) cairo_surface_destroy(s); }
 };
 
@@ -225,8 +225,21 @@ bool readDrawn(GtkWidget* top, const Shot& shot, GtkWidget* text, Reading& out) 
 	int x = 0, y = 0;
 	if (!gtk_widget_translate_coordinates(text, top, 0, 0, &x, &y)) return false;
 	const int w = gtk_widget_get_allocated_width(text), h = gtk_widget_get_allocated_height(text);
+	// Only what shows of it: clipped to every part it's in (a row scrolled
+	// out of its list, or a menu's row scrolled out of its menu, isn't on
+	// screen; what's drawn there is something else).
+	int cx0 = x, cy0 = y, cx1 = x + w, cy1 = y + h;
+	for (GtkWidget* a = gtk_widget_get_parent(text); a && a != top; a = gtk_widget_get_parent(a)) {
+		int ax = 0, ay = 0;
+		if (!gtk_widget_translate_coordinates(a, top, 0, 0, &ax, &ay)) return false;
+		cx0 = std::max(cx0, ax);
+		cy0 = std::max(cy0, ay);
+		cx1 = std::min(cx1, ax + gtk_widget_get_allocated_width(a));
+		cy1 = std::min(cy1, ay + gtk_widget_get_allocated_height(a));
+	}
+	if ((cx1 - cx0) * (cy1 - cy0) < 0.6 * w * h || cx1 <= cx0 || cy1 <= cy0) return false;
 	const int k = Shot::kScale;
-	const int x0 = std::max(0, x * k), y0 = std::max(0, y * k), x1 = std::min(shot.w * k, (x + w) * k), y1 = std::min(shot.h * k, (y + h) * k);
+	const int x0 = std::max(0, cx0 * k), y0 = std::max(0, cy0 * k), x1 = std::min(shot.w * k, cx1 * k), y1 = std::min(shot.h * k, cy1 * k);
 	if (x1 - x0 < 2 || y1 - y0 < 2) return false;
 	const unsigned char* data = cairo_image_surface_get_data(shot.s);
 	const int stride = cairo_image_surface_get_stride(shot.s);
@@ -402,6 +415,8 @@ void readMenu(GtkWidget* pop, const std::string& where, StateTally& plain, State
 		Shot shot;
 		drawShot(pop, shot);
 		readItem(it, shot, lit, "a row lit (the pointer on it)");
+		// The rows showing now (a long menu scrolls to the lit one), as they are.
+		for (GtkWidget* other : items) if (other != it && gtk_widget_is_sensitive(other)) readItem(other, shot, plain, "a row");
 		GtkWidget* sub = gtk_menu_item_get_submenu(GTK_MENU_ITEM(it));
 		if (deeper && sub) {
 			g_signal_emit_by_name(it, "activate-item");   // opens its submenu now
