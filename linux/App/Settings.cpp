@@ -780,7 +780,7 @@ GtkWidget* toggle(bool value, bool enabled, std::function<void(bool)> changed) {
 
 GtkWidget* privacyPage() {
 	Rows r;
-	// Crash reports: kept for a build that has a crash reporter (the Linux app has none yet).
+	// Crash reports (CrashReports.h): on starts them now, off takes effect the next time CedarLogic opens.
 	r.add("Crash reports", toggle(privacy::crashAllowed() == 1 && !privacy::crashPolicyOff(), !privacy::crashPolicyOff(), [](bool v) {
 		privacy::record(privacy::Choice::Custom, v, privacy::usageOn());
 	}), privacy::crashHint());

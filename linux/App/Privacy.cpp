@@ -1,6 +1,7 @@
 // One consent for crash reports and usage stats (see Privacy.h).
 
 #include "Privacy.h"
+#include "CrashReports.h"
 #include "ShowMeAround.h"
 #include "UsageReport.h"
 #include "UsageStats.h"
@@ -66,20 +67,24 @@ const char* choiceKey(Choice c) {
 	}
 }
 
-bool crashInBuild() { return false; }
+bool crashInBuild() { return crashreports::inBuild(); }
 bool crashPolicyOff() { return usage::policySet("DisableCrashReporting"); }
 bool crashOffered() { return crashInBuild() && !crashPolicyOff(); }
 bool usagePolicyOff() { return usagestats::policyOff(); }
 bool usageOffered() { return !usagePolicyOff(); }
-// (The question is asked for usage stats alone while crash reports aren't in
-// the build; with both turned off by policy there's nothing to ask.)
+// (The question is asked for usage stats alone in a build without the crash
+// reporter; with both turned off by policy there's nothing to ask.)
 bool anythingToAsk() { return crashOffered() || usageOffered(); }
 int crashAllowed() { return prefs().crashReports; }
 bool usageOn() { return usagestats::on(); }
 
 void record(Choice c, bool crash, bool usage) {
-	// Crash reports: the answer is kept (for a build that has them), unless a policy says no.
-	if (!crashPolicyOff()) prefs().crashReports = crash ? 1 : 0;
+	// Crash reports: the answer is kept, unless a policy says no. Yes starts them now; No takes
+	// effect the next time CedarLogic opens (CrashReports.h).
+	if (!crashPolicyOff()) {
+		prefs().crashReports = crash ? 1 : 0;
+		crashreports::answerChanged();
+	}
 	if (usageOffered() && usageOn() != usage) usagestats::set(usage);
 	prefs().privacyAsked = true;
 	prefs().privacyChoice = choiceKey(c);
@@ -208,8 +213,7 @@ void showWhatsSent(GtkWindow* owner) {
 	gtk_container_add(GTK_CONTAINER(frame), json);
 	gtk_box_pack_start(GTK_BOX(v), frame, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(v), line("Crash reports", true), FALSE, FALSE, 4);
-	gtk_box_pack_start(GTK_BOX(v), line(crashInBuild() ? std::string(kCrashLine)
-	                                                   : std::string(kCrashLine) + " (Not in this Linux build yet: it sends no crash reports.)"),
+	gtk_box_pack_start(GTK_BOX(v), line(crashInBuild() ? std::string(kCrashLine) : std::string(kCrashLine) + " (Not in this build.)"),
 	                   FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(v), line("Never sent", true), FALSE, FALSE, 4);
 	std::string never;
@@ -245,8 +249,7 @@ GtkWidget* whatsSentWindow() { return g_sentWindow; }
 
 std::string crashHint() {
 	if (crashPolicyOff()) return "Turned off on this computer by its administrator (" + usage::policyFile() + ": DisableCrashReporting).";
-	if (!crashInBuild())
-		return "Not in this Linux build yet: it sends no crash reports. Your choice is kept for a version that does.";
+	if (!crashInBuild()) return "Not in this build.";
 	return std::string(kCrashLine) + " Off takes effect the next time CedarLogic opens.";
 }
 

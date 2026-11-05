@@ -220,7 +220,7 @@ int consentCheck(CircuitWindow* w) {
 		printf("privacy check (policy): %d passed, %d failed\n", gPassed, gFailed);
 		return gFailed ? 1 : 0;
 	}
-	printf("     (crash reports %s)\n", privacy::crashInBuild() ? "in this build" : "not in this Linux build: the answer is kept, nothing sent");
+	printf("     (crash reports %s)\n", privacy::crashInBuild() ? "in this build" : "not in this build: the answer is kept, nothing sent");
 	std::string why;
 	guarded("the privacy check", [&] {
 		// ---- The welcome's "A small favour" page.

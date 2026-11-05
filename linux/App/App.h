@@ -147,7 +147,7 @@ struct Prefs {
 	// as the Mac's cl.crashReports, cl.usageStats, cl.privacyAsked and
 	// cl.privacyChoice (and the Windows app's). The usage id and what's counted
 	// are in ~/.config/CedarLogic/usage.json (UsageReport.h), not here.
-	int crashReports = -1;        // -1 not chosen yet, 0 off, 1 on (kept for a build that has them)
+	int crashReports = -1;        // -1 not chosen yet, 0 off, 1 on (CrashReports.h)
 	bool usageStats = false;      // the switch
 	bool privacyAsked = false;
 	std::string privacyChoice;    // "yes", "no" or "custom" ("" not asked)

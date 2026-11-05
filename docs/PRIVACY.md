@@ -182,10 +182,22 @@ Raspberry Pi touchscreen's 800x480, a Wayland desktop's panels) both take the
 room the screen has and scroll. **Settings > Privacy** has both switches, See
 exactly what's sent, Last sent (the date and kind) and Delete what's been sent.
 
-**Crash reports** aren't in the Linux app yet: it has no crash reporter built
-in and sends none. The question is the same (one consent for both), and your
-answer is kept (`crashReports` in `native.ini`) for a version that has one;
-Settings > Privacy and "See exactly what's sent" say so.
+**Crash reports** go to the same Sentry project as the Mac's and Windows',
+tagged `platform=linux`, with sentry-native's in-process backend (built into
+the app; nothing extra to install). When CedarLogic crashes, the report
+(where in the app it went wrong, as addresses in its own file, and the Linux
+and CedarLogic versions) is written to
+`~/.local/share/CedarLogic/crash-reports` and sent the next time CedarLogic
+opens, if crash reports are still on, through the same `curl` program sync
+and feedback use. Before it goes, every path loses its user name
+(`/home/<user>/...`), your user name, real name, home folder and computer's
+names are taken out wherever they are, and a report that still has one in it
+is dropped rather than sent. There's no trail of clicks or network requests,
+no session tracking, no user and no memory dump (crashpad's and breakpad's
+minidumps would carry raw memory and full paths, which can't be cleaned
+first, so they aren't used). Off takes effect the next time CedarLogic opens;
+`DisableCrashReporting=true` in `/etc/cedarlogic/policy.ini` turns them off
+for everyone.
 
 **Usage stats** are the same report, with:
 
@@ -256,9 +268,14 @@ sent, and with both set nobody is asked (the welcome passes the page by).
   the end); `--privacy-check` presents the welcome's page and the sheet in
   real windows on an X display and answers them with the real pointer
   (xdotool), and with `CL_POLICY_FILE` naming a stand-in policy file and
-  `CL_EXPECT_POLICY=1` checks that nothing is asked, counted or offered. CI
-  (`.github/workflows/linux-native.yml`) runs the usage check and the consent
-  check at 1600x1000 and 800x480, and with the policy. Nothing is sent from a
+  `CL_EXPECT_POLICY=1` checks that nothing is asked, counted or offered;
+  `--crash-check` checks the crash reports' cleaning and that Sentry starts
+  and stops. CI (`.github/workflows/linux-native.yml`) runs the usage check
+  and the consent check at 1600x1000 and 800x480, and with the policy, and
+  crashes a copy of the app on purpose (run from under the home folder) to
+  check the report that arrives at a stand-in for Sentry
+  (`linux/Tools/sentry-mock.py`, on the same computer): the crash, tagged
+  `platform=linux`, with no user name, host name or home folder in it. Nothing is sent from a
   test or picture run, from CI, or with any `CL_` variable set, unless
   `CL_USAGE_URL` names a stand-in on the same computer or the site or one of
   its drafts.

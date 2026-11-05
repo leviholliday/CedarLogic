@@ -607,7 +607,7 @@ float paintAsk(cairo_t* cr, Panel& panel, Ask& a, float x, float y, float w, boo
 		const bool crashOk = privacy::crashOffered(), usageOk = privacy::usageOffered();
 		const std::string crashLine = crashOk ? "Where it went wrong, if CedarLogic crashes."
 		                            : privacy::crashPolicyOff() ? "Turned off on this computer by its administrator."
-		                                                        : "Not in this Linux build yet (it sends none); your choice is kept for later.";
+		                                                        : "Not in this build.";
 		const std::string usageLine = usageOk ? "How often it's open and for how long, and which features are used."
 		                                      : "Turned off on this computer by its administrator.";
 		const float rowW = std::min(w, 520.0f);

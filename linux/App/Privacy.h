@@ -8,9 +8,8 @@
 // DisableUsageStats=true), switches either off for everyone and greys it
 // out. docs/PRIVACY.md has the same words as "See exactly what's sent".
 //
-// Crash reports aren't in the Linux app yet (no crash reporter is built
-// in): the question is the same, and the answer is kept (crashReports in
-// native.ini) for the version that has one, but nothing is sent.
+// Crash reports are sentry-native's in-process backend (CrashReports.h);
+// the answer is kept in native.ini (crashReports), as the usage stats' is.
 //
 // The welcome's page and the sheet are drawn in Welcome.cpp (the brand's
 // look and its panels); the rest is here.
@@ -47,7 +46,7 @@ bool asked();
 Choice choice();
 const char* choiceKey(Choice c);   // "yes", "no", "custom", ""
 
-bool crashInBuild();   // a crash reporter in this build (not yet on Linux)
+bool crashInBuild();   // a crash reporter in this build (sentry-native: CrashReports.h)
 bool crashOffered();   // in this build, not turned off by policy
 bool crashPolicyOff();
 bool usageOffered();   // not turned off by policy

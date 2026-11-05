@@ -1,0 +1,36 @@
+name: sentry-native
+description: >
+  Crash reports (linux/App/CrashReports.h): sentry-native, a pinned release's
+  source (checked against the SHA-256 GitHub keeps for it), built with its
+  in-process backend and no transport of its own (the app sends through the
+  curl program), static, into ./sentry-dist and kept in the cache for the next
+  run. Never in git, never in the .deb or the AppImage (it's linked in).
+inputs:
+  arch:
+    description: x86_64 or aarch64
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Cache sentry-native
+      id: sentry-cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: sentry-dist
+        key: sentry-native-0.17.4-inproc-static-linux-${{ inputs.arch }}-v1
+
+    - name: Build sentry-native
+      if: steps.sentry-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        V=0.17.4
+        curl -sSfL --retry 3 -o sentry-native.zip "https://github.com/getsentry/sentry-native/releases/download/$V/sentry-native.zip"
+        echo "804811557b5d42ddd51cb1241bf851964d75547a4eb7b5ad97b73a4de965ab25  sentry-native.zip" | sha256sum -c -
+        mkdir -p sentry-src
+        (cd sentry-src && unzip -q ../sentry-native.zip)
+        cmake -S sentry-src -B sentry-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSENTRY_BACKEND=inproc -DSENTRY_TRANSPORT=none \
+          -DSENTRY_BUILD_SHARED_LIBS=OFF -DSENTRY_BUILD_TESTS=OFF -DSENTRY_BUILD_EXAMPLES=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+          -DCMAKE_INSTALL_PREFIX="$PWD/sentry-dist"
+        cmake --build sentry-build
+        cmake --install sentry-build
+        find sentry-dist -maxdepth 4 | head -40
