@@ -49,7 +49,7 @@ jobs:
       matrix:
         # inputs.platforms is only set when called from another workflow; a push
         # or manual run builds everything.
-        include: ${{ fromJSON(inputs.platforms || '[{"name":"linux","os":"ubuntu-22.04","args":"linux"},{"name":"windows","os":"windows-2022","args":"windows"},{"name":"macos","os":"macos-14","args":"macos"}]') }}
+        include: ${{ fromJSON(inputs.platforms || '[{"name":"linux","os":"ubuntu-22.04","args":"linux"},{"name":"windows","os":"windows-2022","args":"windows"},{"name":"macos","os":"macos-26","args":"macos"}]') }}
     steps:
       - name: Checkout CedarLogic (GN args only)
         uses: actions/checkout@v7
