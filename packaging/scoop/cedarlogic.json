@@ -10,11 +10,11 @@
     "architecture": {
         "64bit": {
             "url": "https://github.com/leviholliday/CedarLogic-Releases/releases/download/v0.4/CedarLogic-0.4-Windows-x64.zip",
-            "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            "hash": "5fdb62c443aca499a9b3823424c2a98b0f54cd6eb7fb74ff6c00c9ab30ecddf7"
         },
         "arm64": {
             "url": "https://github.com/leviholliday/CedarLogic-Releases/releases/download/v0.4/CedarLogic-0.4-Windows-ARM64.zip",
-            "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            "hash": "56fc3bb604b1a98ee5cc814dfd16864a56526b5c1cbc48519735a1a87624da63"
         }
     },
     "extract_dir": "CedarLogic",

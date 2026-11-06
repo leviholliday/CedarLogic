@@ -1,6 +1,6 @@
 cask "cedarlogic" do
-  version "0.3.4"
-  sha256 "8e09f61dff66b8dbb2a43e6c38700f30789e569c819a0132a2686776267862ca"
+  version "0.4"
+  sha256 "fa036bd3a84c6f08736de352f4387590d83321880fe9d42ec97f57a1bfb5b8ee"
 
   url "https://github.com/leviholliday/CedarLogic-Releases/releases/download/v#{version}/CedarLogic-#{version}-Mac.dmg"
   name "CedarLogic"
