@@ -730,8 +730,8 @@ final class CanvasController: ObservableObject {
     /// something on it (so an empty ⌘N leaves nothing behind), and a .cdl
     /// file opened from elsewhere carries on as a copy there (the file
     /// itself is left alone; File ▸ Export gets a file out). Opening the
-    /// same file again finds the copy. Old versions' read-only copies (in
-    /// the temporary folder) stay as they are. If it can't be written there
+    /// same file again finds the copy. Copies opened only to look at (in
+    /// Library.scratchFolder) stay as they are. If it can't be written there
     /// (the disk full, the folder not writable), the status bar says why and
     /// it's tried again every few seconds until it is.
     private func adoptIntoLibrary(_ d: NSDocument) {
@@ -739,12 +739,11 @@ final class CanvasController: ObservableObject {
         let type = d.fileType ?? UTType.cedarLogicCircuit.identifier
         let name: String, source: URL?
         if let url = d.fileURL {
-            let temp = FileManager.default.temporaryDirectory.standardizedFileURL.path
-            if Library.contains(url) || url.standardizedFileURL.path.hasPrefix(temp) { adopted = true; return }
+            if Library.contains(url) || Library.isScratch(url) { adopted = true; return }
             name = url.deletingPathExtension().lastPathComponent
             source = url
         } else {
-            guard document.hasGates else { return }
+            guard document.hasContent else { return }
             name = document.libraryName ?? "Untitled Circuit"
             source = nil
         }

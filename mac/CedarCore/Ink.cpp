@@ -546,6 +546,13 @@ void cl_notes_set(CLDocument* doc, const char* utf8) {
 	doc->edited = true;
 }
 
+bool cl_document_has_content(const CLDocument* doc) {
+	if (doc == nullptr) return false;
+	if (cl_ink_any(doc) || !doc->circuit.circuitNotes.empty()) return true;
+	for (int p = 0; p < cl_document_page_count(doc); p++) if (cl_document_gate_count(doc, p) > 0) return true;
+	return false;
+}
+
 // ---- Saving for others -------------------------------------------------------------------
 
 const char* cl_document_save_text_ex(CLDocument* doc, int flags) {

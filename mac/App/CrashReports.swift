@@ -57,6 +57,8 @@ enum CrashReports {
             // Crashes only: "app hanging" reports (any 2 s the main thread is
             // busy, a save panel open included) read as errors and aren't.
             o.enableAppHangTracking = false
+            // Nothing on a launch that didn't crash (Sentry's sessions report each one).
+            o.enableAutoSessionTracking = false
             // No trail of what led up to it (clicks, windows, the addresses
             // the app talked to), and no reports of failed requests: none of
             // that is "where it went wrong", and the question promises no more.

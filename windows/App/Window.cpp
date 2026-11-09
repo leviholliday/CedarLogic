@@ -2383,9 +2383,7 @@ static std::string writeText(const std::string& file, const std::string& text) {
 bool CircuitWindow::saveQuietly(bool explicitSave) {
 	library::Item it;
 	const bool inLibrary = library::itemFor(path, it);
-	bool hasGates = false;
-	for (int p = 0; p < cl_document_page_count(doc) && !hasGates; p++) hasGates = cl_document_gate_count(doc, p) > 0;
-	if (!inLibrary && !hasGates && !explicitSave) return true;   // nothing to keep
+	if (!inLibrary && !cl_document_has_content(doc) && !explicitSave) return true;   // nothing to keep
 	const std::string text = cl_document_save_text(doc);   // marks the engine's copy saved
 	std::string err;
 	if (inLibrary) {

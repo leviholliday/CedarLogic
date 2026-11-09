@@ -371,6 +371,21 @@ int main(int argc, char** argv) {
 		check(std::string(cl_document_save_text_ex(doc, CL_SAVE_NO_NOTES)).find("(notes") == std::string::npos, "a link leaves the notes out");
 		// A label too (every string): text through a gate's setting.
 		cl_notes_set(doc, "");
+		{
+			CLDocument* fresh = cl_document_new();
+			check(!cl_document_has_content(fresh), "a new circuit: nothing to keep yet");
+			cl_notes_set(fresh, "Only notes so far");
+			check(cl_document_has_content(fresh), "notes and no parts: worth keeping");
+			cl_notes_set(fresh, "");
+			check(!cl_document_has_content(fresh), "the notes taken out again: nothing to keep");
+			cl_ink_begin(fresh, 0, CL_INK_PEN, "ink", 2, 1);
+			CLInkPoint line[2] = {};
+			line[1].x = 10; line[1].y = 10;
+			cl_ink_add(fresh, line, 2);
+			cl_ink_end(fresh);
+			check(cl_ink_any(fresh) == cl_document_has_content(fresh) && cl_document_has_content(fresh), "a drawing and no parts: worth keeping");
+			cl_document_close(fresh);
+		}
 		check(std::string(cl_document_save_text(doc)).find("(notes") == std::string::npos, "empty notes: not written");
 
 		// ---- Older formats ----

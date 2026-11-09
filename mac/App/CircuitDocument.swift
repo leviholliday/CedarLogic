@@ -31,6 +31,8 @@ final class CoreDocument: ObservableObject {
     var libraryName: String?
     /// Whether any page has anything on it.
     var hasGates: Bool { (0..<pageCount).contains { cl_document_gate_count(handle, Int32($0)) > 0 } }
+    /// Anything of the student's in it: a part, a drawing or notes.
+    var hasContent: Bool { cl_document_has_content(handle) }
 
     init(data: Data) throws {
         var error = [CChar](repeating: 0, count: 512)
