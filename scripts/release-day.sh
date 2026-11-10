@@ -338,7 +338,7 @@ testing_on_commit() {   # both test builds' tags on C?
 }
 
 step_4() {
-	local args=(--files-only --commit "$COMMIT" --site "$SITE" --work "$WORKDIR/assets")
+	local args=(--files-only --version "$VERSION" --commit "$COMMIT" --site "$SITE" --work "$WORKDIR/assets")
 	if [ "$MODE" = go ]; then args+=(--go); [ "$YES" = 0 ] || args+=(--yes)
 	else
 		args+=(--dry-run --keep)
@@ -354,7 +354,7 @@ step_4() {
 }
 
 step_5() {
-	local args=(--notes-only --notes "$NOTES" --work "$WORKDIR/notes")
+	local args=(--notes-only --version "$VERSION" --notes "$NOTES" --work "$WORKDIR/notes")
 	[ "$MODE" = go ] && args+=(--go) || args+=(--dry-run)
 	[ "$YES" = 0 ] || args+=(--yes)
 	if sub bash "$ROOT/scripts/release-assets.sh" "${args[@]}"; then res OK "the notes would be set on $TAG"
@@ -478,7 +478,7 @@ step_10() {
 		[ -d "$BUCKET/.git" ] || git clone https://github.com/leviholliday/scoop-cedarlogic "$BUCKET" || { res FAIL "clone failed"; return 1; }
 		bash "$bump" "$VERSION" --bucket "$BUCKET" || { res FAIL "scoop/bump.sh failed"; return 1; }
 		[ -f "$BUCKET/README.md" ] || printf '# CedarLogic for Scoop\n\n    scoop bucket add cedarlogic https://github.com/leviholliday/scoop-cedarlogic\n    scoop install cedarlogic/cedarlogic\n\nThe app: https://cedarlogic.netlify.app\n' > "$BUCKET/README.md"
-		git -C "$BUCKET" add -A && git -C "$BUCKET" --no-pager diff --cached --stat
+		git -C "$BUCKET" add bucket README.md && git -C "$BUCKET" --no-pager diff --cached --stat
 		confirm "Commit and push the bucket ($BUCKET)?" || { res FAIL "bucket not pushed"; return 1; }
 		git -C "$BUCKET" commit -m "CedarLogic $VERSION" && git -C "$BUCKET" push || { res FAIL "bucket commit/push failed"; return 1; }
 		res OK "the Scoop bucket has $VERSION"
