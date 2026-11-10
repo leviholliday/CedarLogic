@@ -4,7 +4,25 @@ What changed in each version of CedarLogic. The format follows [Keep a Changelog
 
 Versions 0.2 to 0.3.19 were Mac only. 0.4 is the first version for Mac, Windows and Linux together. Releases marked "beta" went to Beta testers first.
 
-## [0.4] - Unreleased
+## [0.4.1] - 2026-11-10
+
+A data-safety and privacy update for Mac, Windows and Linux.
+
+### Fixed
+
+- Mac: **a circuit opened from a share link is kept.** It joins Your Circuits, as an imported file does, and opening the same link again finds it. In 0.4 it was saved in a temporary folder that macOS empties after a few days.
+- **A new circuit with only notes or a drawing is saved.** In 0.4 a circuit wasn't kept until it had a part on it. (Mac, Windows, Linux)
+- Mac: **Version History's Restore brings back the circuit whose versions are listed**, even when another circuit's window is in front, and waits for that circuit's save first.
+- Linux: sync no longer changes or closes a circuit while a dialog is open over it.
+- Opening or saving a file with a part type this version doesn't have no longer adds a blank category to the parts list. (Mac, Windows, Linux)
+
+### Security
+
+- Mac: **crash reports send nothing unless CedarLogic crashes.** With crash reports turned on, 0.4's crash reporter was also set to count each time the app opened (no circuits, names or files). That is off, as Settings > Privacy has always said. Windows and Linux never had it on.
+- The one-line installs (`install.sh`, `install.ps1`) refuse a release that has no signed list of its files.
+- `scripts/sign-preview.sh` only signs a commit this clone already has, and asks again when the build's own recipe changed.
+
+## [0.4] - 2026-11-05
 
 ### Added
 
