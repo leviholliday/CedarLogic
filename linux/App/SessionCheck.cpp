@@ -581,9 +581,7 @@ struct SessionDriver {
 			pump(2700);
 		}
 		pauses++;
-		bool anyGates = false;
-		for (int p = 0; p < cl_document_page_count(doc()) && !anyGates; p++) anyGates = cl_document_gate_count(doc(), p) > 0;
-		if (w->filePath().empty() && !anyGates) return;   // an empty new circuit isn't kept
+		if (w->filePath().empty() && !cl_document_has_content(doc())) return;   // an empty new circuit isn't kept
 		if (w->isDirty()) {
 			pausesUnsaved++;
 			fail(format("pause at action %d: still unsaved (autosave %s, busy %d, floating %d, tidy %d, connecting %d)", at,

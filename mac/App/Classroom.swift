@@ -825,9 +825,9 @@ enum AssignmentCopies {
 
 @MainActor
 enum ScratchCircuit {
-    /// A circuit opened from text as a scratch copy (the temporary folder: never in Your Circuits).
+    /// A circuit opened from text as a scratch copy (never in Your Circuits).
     static func open(_ text: String, named name: String) {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("CedarLogic Classroom/\(UUID().uuidString)", isDirectory: true)
+        let dir = Library.scratchFolder.appendingPathComponent(UUID().uuidString, isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let file = dir.appendingPathComponent(safeName(name) + ".cdl")

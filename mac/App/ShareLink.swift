@@ -77,7 +77,8 @@ enum ShareLink {
             var name = link.name.trimmingCharacters(in: .whitespacesAndNewlines)
             name = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
             if name.isEmpty { name = "Shared circuit" }
-            let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            // Named for what's in it, so opening the same link again finds its copy.
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("CedarLogic Links/" + String(format: "%016llx", Library.fnv1a(text)), isDirectory: true)
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let file = dir.appendingPathComponent("\(name).cdl")
             try text.write(to: file, atomically: true, encoding: .utf8)

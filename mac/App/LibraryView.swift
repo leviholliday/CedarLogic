@@ -101,6 +101,15 @@ enum Library {
         return LibraryItem(id: id, name: name, folder: folder, modified: Date())
     }
 
+    /// Where copies opened only to look at go (an old version, a hand-in):
+    /// the one part of the temporary folder not taken into Your Circuits.
+    static var scratchFolder: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("CedarLogic Scratch", isDirectory: true)
+    }
+    static func isScratch(_ url: URL) -> Bool {
+        url.standardizedFileURL.path.hasPrefix(scratchFolder.standardizedFileURL.path + "/")
+    }
+
     /// Whether a file is part of the library (a circuit or one of its versions).
     static func contains(_ url: URL) -> Bool {
         url.standardizedFileURL.path.hasPrefix(root.standardizedFileURL.path + "/")
@@ -112,7 +121,7 @@ enum Library {
     private static func sourceMark(_ url: URL, text: String) -> String {
         url.standardizedFileURL.path + "\n" + String(format: "%016llx", fnv1a(text))
     }
-    private static func fnv1a(_ s: String) -> UInt64 {
+    static func fnv1a(_ s: String) -> UInt64 {
         var h: UInt64 = 0xcbf29ce484222325
         for b in s.utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
         return h
@@ -299,7 +308,7 @@ enum Library {
     static func openCopy(of version: LibraryVersion, named name: String) {
         let f = DateFormatter()
         f.dateFormat = "MMM d, h.mm a"
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let dir = scratchFolder.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let copy = dir.appendingPathComponent("\(name) (\(f.string(from: version.date))).cdl")
         do {
@@ -797,7 +806,8 @@ struct VersionHistoryView: View {
     @ObservedObject private var prefs = Prefs.shared
     @Environment(\.dismiss) private var dismiss
     @State private var fileURL: URL?
-    @State private var versions: [(url: URL, date: Date, fileVersion: NSFileVersion?)] = []
+    private typealias Version = (url: URL, date: Date, fileVersion: NSFileVersion?)
+    @State private var versions: [Version] = []
     @State private var selection = 0
     @State private var keys = PickerKeys()
     @State private var problem: String?
@@ -881,12 +891,26 @@ struct VersionHistoryView: View {
     /// The chosen version becomes the circuit; the one it replaces is kept
     /// as a version first, so nothing is lost.
     private func restore() {
-        guard versions.indices.contains(selection), let url = fileURL,
-              let w = CanvasController.front?.view?.window,
-              let doc = NSDocumentController.shared.document(for: w) else { return }
+        guard versions.indices.contains(selection), let url = fileURL else { return }
         let v = versions[selection]
+        // The circuit these versions are of, front or not (nil if it's since been closed).
+        let doc = NSDocumentController.shared.document(for: url)
+        guard let doc, doc.isDocumentEdited else { put(v, at: url, into: doc); return }
+        // Its latest edits on disk first, so they're in the version kept below
+        // and a save still under way can't land on top of the restored file.
+        doc.save(to: url, ofType: doc.fileType ?? "org.cedarlogic.cdl", for: .saveOperation) { error in
+            DispatchQueue.main.async {
+                if let error {
+                    problem = "Couldn't restore that version: \(error.localizedDescription)"
+                } else {
+                    put(v, at: url, into: doc)
+                }
+            }
+        }
+    }
+
+    private func put(_ v: Version, at url: URL, into doc: NSDocument?) {
         do {
-            if doc.isDocumentEdited { doc.save(nil) }
             if let fv = v.fileVersion {
                 try fv.replaceItem(at: url)
             } else {
@@ -899,7 +923,7 @@ struct VersionHistoryView: View {
                 let data = try Data(contentsOf: v.url)
                 try data.write(to: url, options: .atomic)
             }
-            try doc.revert(toContentsOf: url, ofType: doc.fileType ?? "org.cedarlogic.cdl")
+            if let doc { try doc.revert(toContentsOf: url, ofType: doc.fileType ?? "org.cedarlogic.cdl") }
             SyncCenter.libraryChanged()
             dismiss()
         } catch {

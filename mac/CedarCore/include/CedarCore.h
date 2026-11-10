@@ -582,6 +582,9 @@ void cl_simview_draw_predict(CLDocument *doc, int page, CLContext ctx, double ba
                              const CLPredictMark *marks, int count, bool projector);
 
 int cl_document_gate_count(const CLDocument *doc, int page);
+// Whether there is anything of the student's in it: a part on any page, a drawing or
+// notes. An untitled circuit joins Your Circuits once there is.
+bool cl_document_has_content(const CLDocument *doc);
 
 // Pages, undoably: closing takes the page and what's on it off (undo brings
 // it back); Reopen is an undo of the last close. Moving reorders.

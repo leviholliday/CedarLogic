@@ -780,8 +780,7 @@ private:
 bool Session::needsSaving() const {
 	library::Item it;
 	if (library::itemFor(w->filePath(), it)) return true;
-	for (int p = 0; p < cl_document_page_count(doc()); p++) if (cl_document_gate_count(doc(), p) > 0) return true;
-	return false;
+	return cl_document_has_content(doc());
 }
 
 // The palette's way in: a gate chosen there follows the pointer onto the
