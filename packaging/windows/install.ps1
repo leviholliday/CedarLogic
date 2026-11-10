@@ -9,9 +9,9 @@
 # %LOCALAPPDATA%\Programs\CedarLogic, the Start menu and Settings > Apps.
 #
 # The check: the file's size and SHA-256 must be the ones GitHub records for
-# the release's file, and when the release has a signed list (SHA256SUMS and
+# the release's file, and the release must have a signed list (SHA256SUMS and
 # SHA256SUMS.sig, signed with CedarLogic's update key: the same key and format
-# as the apps' updaters, update-signing/UpdateSignature.h), the signature must
+# as the apps' updaters, update-signing/UpdateSignature.h): the signature must
 # check out and the list must name this file with that size and SHA-256.
 # Anything off and nothing is installed.
 #
@@ -260,29 +260,27 @@ function Install-CedarLogicFromRelease {
 			$checked += "GitHub's SHA-256"
 		}
 
-		# The signed list, when the release has one.
+		# The signed list: a release without one isn't installed (GitHub's checksum
+		# can be changed by whoever can change the file).
 		$sums = $release.assets | Where-Object { $_.name -eq 'SHA256SUMS' } | Select-Object -First 1
 		$sig = $release.assets | Where-Object { $_.name -eq 'SHA256SUMS.sig' } | Select-Object -First 1
-		if ($sums -or $sig) {
-			if (-not ($sums -and $sig)) { Fail 'the release has half of its signed list (SHA256SUMS without SHA256SUMS.sig, or the other way round).' }
-			$sumsFile = Join-Path $dir 'SHA256SUMS'; $sigFile = Join-Path $dir 'SHA256SUMS.sig'
-			try {
-				Invoke-WebRequest -Uri $sums.browser_download_url -OutFile $sumsFile -UseBasicParsing -UserAgent $ua
-				Invoke-WebRequest -Uri $sig.browser_download_url -OutFile $sigFile -UseBasicParsing -UserAgent $ua
-			} catch { Fail "couldn't download the release's signed list ($($_.Exception.Message)). Try again." }
-			$listBytes = [IO.File]::ReadAllBytes($sumsFile)
-			$sigBytes = [IO.File]::ReadAllBytes($sigFile)
-			Say 'Checking the signature...'
-			if (-not (Test-Ed25519 $listBytes $sigBytes (HexBytes $PublicKeyHex))) { Fail "the release's signed list doesn't check out against CedarLogic's key. Nothing was changed." }
-			$lines = [Text.Encoding]::UTF8.GetString($listBytes).Split("`n")
-			if ($lines.Count -lt 5 -or $lines[0] -ne $Header -or $lines[1] -ne "tag $relTag") { Fail "the signed list isn't for release $relTag." }
-			$entry = @($lines | Where-Object { $_ -match '^file (\S+) ([1-9][0-9]*) ([0-9a-f]{64})$' -and $Matches[1] -eq $name })
-			if ($entry.Count -ne 1) { Fail "the signed list doesn't name $name." }
-			$null = $entry[0] -match '^file (\S+) ([1-9][0-9]*) ([0-9a-f]{64})$'
-			if ([long]$Matches[2] -ne $gotSize -or $Matches[3] -ne $gotSha) { Fail "the download isn't the file the signed list names. Nothing was changed." }
-			$checked += 'the signed list'
-		}
-		if ($checked.Count -eq 0) { Fail "the release gives no checksum to check the download against, so it wasn't run. Download it from https://cedarlogic.netlify.app/download/windows/ instead." }
+		if (-not ($sums -and $sig)) { Fail "the release has no signed list, so the download can't be checked. Nothing was changed. Download it from https://cedarlogic.netlify.app/download/windows/ instead." }
+		$sumsFile = Join-Path $dir 'SHA256SUMS'; $sigFile = Join-Path $dir 'SHA256SUMS.sig'
+		try {
+			Invoke-WebRequest -Uri $sums.browser_download_url -OutFile $sumsFile -UseBasicParsing -UserAgent $ua
+			Invoke-WebRequest -Uri $sig.browser_download_url -OutFile $sigFile -UseBasicParsing -UserAgent $ua
+		} catch { Fail "couldn't download the release's signed list ($($_.Exception.Message)). Try again." }
+		$listBytes = [IO.File]::ReadAllBytes($sumsFile)
+		$sigBytes = [IO.File]::ReadAllBytes($sigFile)
+		Say 'Checking the signature...'
+		if (-not (Test-Ed25519 $listBytes $sigBytes (HexBytes $PublicKeyHex))) { Fail "the release's signed list doesn't check out against CedarLogic's key. Nothing was changed." }
+		$lines = [Text.Encoding]::UTF8.GetString($listBytes).Split("`n")
+		if ($lines.Count -lt 5 -or $lines[0] -ne $Header -or $lines[1] -ne "tag $relTag") { Fail "the signed list isn't for release $relTag." }
+		$entry = @($lines | Where-Object { $_ -match '^file (\S+) ([1-9][0-9]*) ([0-9a-f]{64})$' -and $Matches[1] -eq $name })
+		if ($entry.Count -ne 1) { Fail "the signed list doesn't name $name." }
+		$null = $entry[0] -match '^file (\S+) ([1-9][0-9]*) ([0-9a-f]{64})$'
+		if ([long]$Matches[2] -ne $gotSize -or $Matches[3] -ne $gotSha) { Fail "the download isn't the file the signed list names. Nothing was changed." }
+		$checked += 'the signed list'
 		Say ("Checked: " + ($checked -join ' and ') + " (SHA-256 $gotSha).")
 
 		if ($DryRun) { Say "Dry run: $name is downloaded and checked; not installed."; return }

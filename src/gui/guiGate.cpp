@@ -613,7 +613,7 @@ void guiGate::saveGate(XMLParser* xparse) {
 		xparse->closeTag((isInput[pC->first] ? "input" : "output"));
 		pC++;
 	}
-	LibraryGate lg = gateLibrary().libraries[getLibraryName()][getLibraryGateName()];
+	LibraryGate lg = gateLibrary().definition(getLibraryName(), getLibraryGateName());
 	map< string, string >::iterator pParams = gparams.begin();
 	while (pParams != gparams.end()) {
 		// Hit boxes and draw boxes are the library's, not the circuit's.
@@ -690,7 +690,7 @@ void guiGate::saveGateLegacy(XMLParser* xparse) {
 		xparse->closeTag((isInput[pC->first] ? "input" : "output"));
 		pC++;
 	}
-	LibraryGate lg = gateLibrary().libraries[getLibraryName()][getLibraryGateName()];
+	LibraryGate lg = gateLibrary().definition(getLibraryName(), getLibraryGateName());
 	map< string, string >::iterator pParams = gparams.begin();
 	while (pParams != gparams.end()) {
 		// Hit boxes and draw boxes are the library's, not the circuit's.

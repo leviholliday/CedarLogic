@@ -684,7 +684,7 @@ static cl::GateInstance buildGate(guiGate *g) {
 	g->getGLcoords(x, y);
 	gi.at = { savedPrecision(x), savedPrecision(y) };
 
-	LibraryGate lg = gateLibrary().libraries[g->getLibraryName()][g->getLibraryGateName()];
+	LibraryGate lg = gateLibrary().definition(g->getLibraryName(), g->getLibraryGateName());
 
 	// angle is a first-class field in the model, not a GUI param.
 	for (const auto &p : *g->getAllGUIParams()) {

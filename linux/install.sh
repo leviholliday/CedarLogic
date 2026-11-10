@@ -27,9 +27,9 @@
 #   - the release's signed list (SHA256SUMS + SHA256SUMS.sig, signed with
 #     CedarLogic's update key, the public half below; the format is
 #     update-signing/UpdateSignature.h's) is for this release and names this
-#     file with its size and SHA-256; or, for a release with no signed list,
-#   - its SHA-256 is the one GitHub's API records for the file.
-# A signed list that doesn't verify stops everything. The .deb is checked
+#     file with its size and SHA-256.
+# A release with no signed list, or one that doesn't verify, stops everything:
+# GitHub's own checksum can be changed by whoever can change the file. The .deb is checked
 # again as root on a copy only root can change, and apt installs that copy.
 #
 # Options (after "sh -s --"), or the same as environment variables:
@@ -137,13 +137,12 @@ EOT
 
 # ---- Which release --------------------------------------------------------------------
 # BASE: where the release's files download from; TAG: its tag; NAME: our file,
-# DIGEST: GitHub's sha256 for it (empty when unknown).
-BASE='' TAG='' NAME='' DIGEST='' NOAPI=0 FELL_BACK=0
+BASE='' TAG='' NAME='' NOAPI=0 FELL_BACK=0
 # The signed rolling test build, by its download URL (no API needed); its
 # signed list says which file is ours.
 use_preview() {
 	say "No full release has CedarLogic for Linux yet, so this installs the signed test build ($PREVIEW_TAG)."
-	REPO=$PREVIEW_REPO TAG=$PREVIEW_TAG NAME='' DIGEST='' FELL_BACK=1
+	REPO=$PREVIEW_REPO TAG=$PREVIEW_TAG NAME='' FELL_BACK=1
 	BASE="https://github.com/$PREVIEW_REPO/releases/download/$PREVIEW_TAG"
 }
 if [ -n "${CEDARLOGIC_TEST_RELEASE:-}${CEDARLOGIC_TEST_KEY:-}" ]; then
@@ -179,7 +178,6 @@ else
 			printf '%s\n' "$n" | grep -Eqx "$PATTERN" || continue
 			case "$url" in "https://github.com/$REPO/releases/download/$t/$n") ;; *) continue ;; esac
 			TAG=$t NAME=$n BASE=${url%/*}
-			[ "$digest" = - ] || DIGEST=$digest
 			break
 		done < "$TMP/assets"
 		if [ -z "$TAG" ]; then
@@ -205,11 +203,11 @@ else
 fi
 printf '%s\n' "$TAG" | grep -Eqx '[A-Za-z0-9._+-]+' || die "a strange release tag: $TAG"
 
-# ---- The signed list, when there is one -----------------------------------------------
+# ---- The signed list -----------------------------------------------
 # 0: verified, and it names our file (SIZE, SHA set); 1: the release has no
 # signed list; 2: a good list with no file for us (only when NAME wasn't known).
 # Anything wrong with a list that is there stops everything.
-SIGNED=0 SIZE='' SHA=''
+SIZE='' SHA=''
 read_signed_list() {
 	rm -f "$TMP/SHA256SUMS" "$TMP/SHA256SUMS.sig"
 	curl -fsSL -o "$TMP/SHA256SUMS" "$BASE/SHA256SUMS" 2>/dev/null && curl -fsSL -o "$TMP/SHA256SUMS.sig" "$BASE/SHA256SUMS.sig" 2>/dev/null || return 1
@@ -230,7 +228,6 @@ read_signed_list() {
 	[ -n "$LINE" ] && [ "$(printf '%s\n' "$LINE" | wc -l | tr -d ' ')" = 1 ] || die "the signed list doesn't name $NAME."
 	SIZE=$(printf '%s\n' "$LINE" | cut -d' ' -f3)
 	SHA=$(printf '%s\n' "$LINE" | cut -d' ' -f4)
-	SIGNED=1
 	return 0
 }
 RC=0
@@ -248,15 +245,9 @@ case "$RC" in
 	*)
 		[ -z "${CEDARLOGIC_TEST_RELEASE:-}" ] || die "the test release has no signed list."
 		[ "$FELL_BACK" = 0 ] && [ "$TAG" != "$PREVIEW_TAG" ] || die "the test build hasn't been signed yet, so it can't be checked. Try again in a little while."
+		die "couldn't get the signed list for release $TAG, so the download can't be checked. Nothing was changed. Try again in a little while, or download it from https://cedarlogic.netlify.app/download/linux/"
 		;;
 esac
-if [ "$SIGNED" = 0 ]; then
-	case "$DIGEST" in
-		sha256:*) SHA=${DIGEST#sha256:} ;;
-		*) die "release $TAG has no signed list, and GitHub gave no checksum for $NAME, so it can't be checked. Try again in an hour, or download it from https://cedarlogic.netlify.app/download/linux/" ;;
-	esac
-	printf '%s\n' "$SHA" | grep -Eqx '[0-9a-f]{64}' || die "GitHub's checksum for $NAME looks wrong: $DIGEST"
-fi
 
 # ---- Download and check ---------------------------------------------------------------
 say "Downloading $NAME (release $TAG)..."
@@ -264,8 +255,8 @@ FILE=$TMP/$NAME
 curl -fL --progress-bar -o "$FILE" "$BASE/$NAME" || die "the download failed. Try again."
 GOT=$(sha256_of "$FILE")
 if [ -n "$SIZE" ] && [ "$(size_of "$FILE")" != "$SIZE" ]; then die "the download is $(size_of "$FILE") bytes, not the $SIZE the signed list says. Nothing was changed."; fi
-[ "$GOT" = "$SHA" ] || die "the download's SHA-256 ($GOT) isn't the one $( [ "$SIGNED" = 1 ] && echo 'the signed list' || echo 'GitHub') gives ($SHA). Nothing was changed."
-say "Checked against $( [ "$SIGNED" = 1 ] && echo "the release's signed list" || echo "GitHub's SHA-256 for it (this release has no signed list)")."
+[ "$GOT" = "$SHA" ] || die "the download's SHA-256 ($GOT) isn't the one the signed list gives ($SHA). Nothing was changed."
+say "Checked against the release's signed list."
 if [ -n "${CEDARLOGIC_DRY_RUN:-}" ]; then say "Dry run: $NAME is downloaded and checked; not installed."; exit 0; fi
 
 # Which testing group this install starts in (Settings > General > Testing

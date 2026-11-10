@@ -54,14 +54,12 @@ command that installs FUSE 2. With no display (SSH), it says to run it once
 instead of starting it. Running as root works without `sudo`.
 
 **Checks**, before anything is installed:
-- with a signed list on the release (`SHA256SUMS` + `.sig`; the test build
-  always has one, and `packaging/sign-release.sh` makes one for a versioned
+- the release's signed list (`SHA256SUMS` + `.sig`; the test build always
+  has one, and `packaging/sign-release.sh` makes one for a versioned
   release): the Ed25519 signature verifies with the update key (`openssl
   pkeyutl -rawin`, OpenSSL 3), the header is `CedarLogic preview manifest 1`,
   the `tag` line is the release's tag, and the file's size and SHA-256 are
-  the list's;
-- with no signed list (only for a versioned release, never the test build):
-  the SHA-256 GitHub's API records for the file. With neither, it refuses.
+  the list's. A release with no signed list is refused.
 
 The .deb is copied into a root-only folder, checked again as root, and apt
 installs that copy, as before.

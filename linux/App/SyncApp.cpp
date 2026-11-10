@@ -184,7 +184,9 @@ public:
 		clsync::WindowState s;
 		for (CircuitWindow* w : windowsFor(folderId)) {
 			s.open = true;
-			s.dirty = s.dirty || w->isDirty() || w->busyEditing();
+			// Unsaved work, a drag or a gate on the pointer, or a dialog open over it:
+			// a change from elsewhere waits, as on Windows.
+			s.dirty = s.dirty || w->isDirty() || w->busyEditing() || w->dialogOver();
 			s.lastInputAt = std::max(s.lastInputAt, w->lastInputMs());
 		}
 		return s;

@@ -1149,6 +1149,30 @@ static void multiWireCases() {
 	}
 }
 
+// A file naming a gate type the library doesn't have: the gate is kept and
+// saved, and the library (the palette's categories) stays as it was.
+static void unknownGateCases() {
+	printf("a gate type the library doesn't have\n");
+	const int categories = cl_library_category_count();
+	CLDocument* doc = cl_document_new();
+	cl_edit_add_gate(doc, 0, "AA_AND2", 10, 10);
+	std::string text = cl_document_save_text(doc);
+	cl_document_close(doc);
+	const size_t at = text.find("AA_AND2");
+	CHECK(at != std::string::npos, "the saved text names the gate");
+	text.replace(at, 7, "ZZ_NOSUCH");
+	char err[512] = "";
+	doc = cl_document_open_text(text.data(), (long)text.size(), err, sizeof err);
+	CHECK(doc != nullptr, "the file opens");
+	if (doc) {
+		CHECK(cl_library_category_count() == categories, "opening it adds nothing to the library");
+		const std::string again = cl_document_save_text(doc);
+		CHECK(again.find("ZZ_NOSUCH") != std::string::npos, "the gate is written back out");
+		CHECK(cl_library_category_count() == categories, "saving it adds nothing to the library");
+		cl_document_close(doc);
+	}
+}
+
 int main(int argc, char** argv) {
 	if (argc < 2 || !cl_library_load(argv[1])) { fprintf(stderr, "usage: core_check gatedefs [fixtures-dir]\n"); return 2; }
 	if (argc > 2) fixtures = argv[2];
@@ -1166,6 +1190,7 @@ int main(int argc, char** argv) {
 	junctionCases();
 	keypadCases();
 	multiWireCases();
+	unknownGateCases();
 
 	printf(fails ? "%d FAILED\n" : "all passed\n", fails);
 	return fails ? 1 : 0;
