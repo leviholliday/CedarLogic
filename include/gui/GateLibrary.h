@@ -25,6 +25,10 @@ public:
 	std::map< std::string, std::map< std::string, LibraryGate > > libraries;
 	// gate name -> the library that owns it (child -> parent).
 	std::map< std::string, std::string > gateNameToLibrary;
+
+	// A gate's definition, or an empty one when the library doesn't have it.
+	// (Not libraries[][], which adds an entry for a name it doesn't know.)
+	LibraryGate definition(const std::string& library, const std::string& gate) const;
 };
 
 // The process-wide gate library. Lives for the whole run, like the app it was

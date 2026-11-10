@@ -76,7 +76,7 @@ bool cmdSetParams::Do() {
 	if (gate == nullptr) return false; // error: gate not found
 	map < string, string >::iterator paramWalk = newLogicParamList.begin();
 	vector < string > dontSendMessages;
-	LibraryGate lg = gateLibrary().libraries[gate->getLibraryName()][gate->getLibraryGateName()];
+	LibraryGate lg = gateLibrary().definition(gate->getLibraryName(), gate->getLibraryGateName());
 	for (unsigned int i = 0; i < lg.dlgParams.size(); i++) {
 		if (lg.dlgParams[i].isGui) continue;
 		if (lg.dlgParams[i].type == "FILE_IN" || lg.dlgParams[i].type == "FILE_OUT") dontSendMessages.push_back(lg.dlgParams[i].name);
@@ -113,7 +113,7 @@ bool cmdSetParams::Undo() {
 	if (gate == nullptr) return false; // error: gate not found
 	map < string, string >::iterator paramWalk = oldLogicParamList.begin();
 	vector < string > dontSendMessages;
-	LibraryGate lg = gateLibrary().libraries[gate->getLibraryName()][gate->getLibraryGateName()];
+	LibraryGate lg = gateLibrary().definition(gate->getLibraryName(), gate->getLibraryGateName());
 	for (unsigned int i = 0; i < lg.dlgParams.size(); i++) {
 		if (lg.dlgParams[i].isGui) continue;
 		if (lg.dlgParams[i].type == "FILE_IN" || lg.dlgParams[i].type == "FILE_OUT") dontSendMessages.push_back(lg.dlgParams[i].name);

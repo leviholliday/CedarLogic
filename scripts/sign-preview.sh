@@ -3,7 +3,8 @@
 #
 #   scripts/sign-preview.sh linux            sign what's on the linux-native-testing release now
 #   scripts/sign-preview.sh windows          the same for windows-native-testing
-#       --yes                                don't ask before signing (still shows what it signs)
+#       --yes                                don't ask before signing (still shows what it signs;
+#                                            refused when the build's own recipe changed, see below)
 #       --skip-ci-compare                    don't compare the release with the CI run's artifacts
 #                                            (only when they've expired; everything else is checked)
 #       --check-only                         every check, then stop: no key, no signing, no upload
@@ -29,6 +30,10 @@
 # Testers' apps see the build at their next update check after step 3.
 #
 # What it checks before signing, and refuses when any is off:
+#   - this clone already has the commit on a local branch or on main, so a
+#     push to the publishing branch from anywhere else isn't signed. It never
+#     fetches: fetching would bring such a commit in. (A commit that reached
+#     main itself passes; the list of what's new, from this clone, is for that.)
 #   - the release's tag, the publishing branch and a successful CI run of the
 #     right workflow are all on the same commit, and stay there while it works
 #   - the release has exactly the files a build makes (no more, no fewer)
@@ -269,6 +274,15 @@ HEAD=$(gh api "repos/$REPO/commits/$BRANCH" --jq .sha) || die "couldn't read $BR
 [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "the tag's commit isn't a commit: $COMMIT"
 [ "$HEAD" = "$COMMIT" ] || die "$BRANCH is on ${HEAD:0:12} but the release's tag is on ${COMMIT:0:12}: CI is still publishing a newer push, or the tag was moved by hand. Wait for CI, then run this again."
 
+# Everything above and below is GitHub's word. This is the one thing it can't
+# say for itself: that this commit is one this clone already had. (Not the
+# tracking refs of the publishing branches: a fetch fills those in.)
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+git -C "$ROOT" cat-file -e "$COMMIT^{commit}" 2>/dev/null \
+	|| die "this clone has never seen ${COMMIT:0:12}, which is what's on $BRANCH: it wasn't pushed from here. Find out who pushed it before signing anything."
+[ -n "$(git -C "$ROOT" for-each-ref --contains "$COMMIT" --count=1 refs/heads refs/remotes/private/main)" ] \
+	|| die "${COMMIT:0:12} isn't on any local branch or on main in this clone, though $BRANCH is on it. If you pushed it, put it on a branch here (git branch <name> ${COMMIT:0:12}) and run this again; if you didn't, find out who did."
+
 RUN=$(gh run list -R "$REPO" --workflow "$WORKFLOW" --branch "$BRANCH" --commit "$COMMIT" --limit 20 \
 	--json databaseId,status,conclusion --jq '[.[] | select(.status == "completed" and .conclusion == "success")][0].databaseId // empty')
 [ -n "$RUN" ] || die "no successful $WORKFLOW run on $BRANCH for ${COMMIT:0:12} (still running? failed?): not signing"
@@ -338,9 +352,22 @@ say "about to sign $TAG:"
 say "  commit ${COMMIT} \"$SUBJECT\""
 say "  build  $BUILD ($(date -r "$BUILD" 2>/dev/null || date -d "@$BUILD"))"
 say "  CI run https://github.com/$REPO/actions/runs/$RUN"
-if [ -n "$LAST_COMMIT" ] && [ "$LAST_COMMIT" != "$COMMIT" ]; then
-	say "  new since the last signed build (${LAST_COMMIT:0:12}):"
-	gh api "repos/$REPO/compare/$LAST_COMMIT...$COMMIT" --jq '.commits[] | "      " + .sha[0:9] + " " + (.commit.message | split("\n")[0])' >&2 || say "      (couldn't list them)"
+# How the build is made and published: a change here is what to read before
+# signing, so --yes doesn't cover one.
+RECIPE=(.github scripts packaging cmake update-signing linux/install.sh linux/CMakeLists.txt windows/CMakeLists.txt windows/installer)
+RECIPE_CHANGED=
+if [ -n "$LAST_COMMIT" ] && git -C "$ROOT" cat-file -e "$LAST_COMMIT^{commit}" 2>/dev/null; then
+	RECIPE_CHANGED=$(git -C "$ROOT" diff --name-only "$LAST_COMMIT" "$COMMIT" -- "${RECIPE[@]}")
+	if [ "$LAST_COMMIT" != "$COMMIT" ]; then
+		say "  new since the last signed build (${LAST_COMMIT:0:12}), from this clone:"
+		git -C "$ROOT" log --format='      %h %s' "$LAST_COMMIT..$COMMIT" >&2
+	fi
+else
+	RECIPE_CHANGED="(this clone doesn't have an earlier signed build to compare with)"
+fi
+if [ -n "$RECIPE_CHANGED" ]; then
+	say "  how the build is made or published has changed since then:"
+	printf '%s\n' "$RECIPE_CHANGED" | sed 's/^/      /' >&2
 fi
 sed 's/^/      /' "$WORK/SHA256SUMS" >&2
 if [ "$PLATFORM" = linux ]; then
@@ -357,6 +384,7 @@ if [ "$CHECK_ONLY" = 1 ]; then
 	say "--check-only: everything checks out; nothing signed, nothing uploaded"
 	exit 0
 fi
+[ "$YES" = 0 ] || [ -z "$RECIPE_CHANGED" ] || die "not with --yes: read the changes listed above, then run this without it"
 if [ "$YES" = 0 ]; then
 	printf 'Sign and upload? Every tester gets this build. [y/N] ' >&2
 	read -r answer

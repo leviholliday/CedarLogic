@@ -210,6 +210,8 @@ public:
 	// In the middle of something (a drag, a gate on the pointer, Tidy Up's preview):
 	// not a moment to save.
 	bool busyEditing() const;
+	// A dialog, file chooser or menu is open: the code behind it is waiting on the circuit as it is.
+	bool dialogOver() const;
 	// The circuit changed on disk (another device's edit): reloaded in place, on the same
 	// page and with the same view, and a quiet note.
 	void reloadForSync(const std::string& message);

@@ -2222,6 +2222,20 @@ struct SessionDriver {
 
 	// ---- The session -------------------------------------------------------------
 
+	// Sync leaves a circuit alone while a dialog is open over it (SyncApp's windowState).
+	void dialogOverChecks() {
+		check(!w->dialogOver(), "nothing open over the window: sync may change the circuit");
+		GtkWidget* d = gtk_dialog_new();
+		gtk_window_set_transient_for(GTK_WINDOW(d), w->window());
+		gtk_window_set_modal(GTK_WINDOW(d), TRUE);
+		gtk_widget_show(d);
+		pump(100);
+		check(w->dialogOver(), "a dialog open over the window: sync waits");
+		gtk_widget_destroy(d);
+		pump(100);
+		check(!w->dialogOver(), "the dialog closed: sync may change the circuit again");
+	}
+
 	int run(int actions, unsigned long long seed) {
 		setvbuf(stdout, nullptr, _IOLBF, 0);
 		rng.s = seed;
@@ -2237,6 +2251,8 @@ struct SessionDriver {
 		// The settings file as it starts: what Settings changes later is compared with it.
 		prefs().save();
 		pump(300);
+		guarded("a dialog over the window", [&] { dialogOverChecks(); });
+		pump(200);
 		guarded("the canvas at the right edge", [&] { edgeChecks(); });
 		pump(200);
 		guarded("Show Me Around by the pointer", [&] { tourPointerChecks(); });

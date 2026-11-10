@@ -1371,6 +1371,10 @@ bool CircuitWindow::busyEditing() const {
 	return (c && c->isDragging()) || isFloating() || tidyActive() || cl_edit_is_connecting(doc);
 }
 
+bool CircuitWindow::dialogOver() const {
+	return gtk_window_group_get_current_grab(gtk_window_get_group(window())) != nullptr;
+}
+
 void CircuitWindow::noteInput() {
 	lastInputMsec = g_get_real_time() / 1000;
 	syncapp::userInput();
