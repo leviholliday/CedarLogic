@@ -6,9 +6,9 @@ Fixes go into the **current release** and the **current beta**. Older versions d
 
 | App | Gets fixes | Notes |
 |---|---|---|
-| CedarLogic for Mac | the newest release and the newest beta | Normal testers follow releases, Beta testers get betas first (Settings > General > Testing group). On 2026-11-10 the newest release is 0.4.1. |
-| CedarLogic for Windows | the newest release and the newest test build | Normal testers follow releases (0.4.1 on 2026-11-10), Beta testers get the rolling test build too. |
-| CedarLogic for Linux | the newest release and the newest test build | Normal testers follow releases (0.4.1 on 2026-11-10), Beta testers get the rolling test build too. |
+| CedarLogic for Mac | the newest release and the newest beta | Normal testers follow releases, Beta testers get betas first (Settings > General > Testing group). On 2026-11-12 the newest release is 0.4.2. |
+| CedarLogic for Windows | the newest release and the newest test build | Normal testers follow releases (0.4.2 on 2026-11-12), Beta testers get the rolling test build too. |
+| CedarLogic for Linux | the newest release and the newest test build | Normal testers follow releases (0.4.2 on 2026-11-12), Beta testers get the rolling test build too. |
 | CedarLogic Online | the website as it is now | |
 | CedarLogic Classic (the wx app) | none | Retired. The last version was 4.0.2 (beta), September 2026. Use the native app for your computer instead. |
 
