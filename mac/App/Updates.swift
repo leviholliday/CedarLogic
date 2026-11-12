@@ -73,9 +73,13 @@ final class Updates: NSObject, SPUUpdaterDelegate {
 
     nonisolated func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
         let text = error.map { ($0 as NSError).domain + " " + String(($0 as NSError).code) + ": " + $0.localizedDescription }
+        // Up to date after the daily check (Sparkle's "no update" error, SUNoUpdateError): a good
+        // moment for a message from CedarLogic (AppMessages.swift).
+        let upToDate = (error as NSError?).map { $0.domain == SUSparkleErrorDomain && $0.code == 1001 } ?? false
         MainActor.assumeIsolated {
             checksFinished += 1
             lastCheckError = text
+            if updateCheck == .updatesInBackground && upToDate { AppMessages.check() }
         }
     }
 }

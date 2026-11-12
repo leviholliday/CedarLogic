@@ -1,0 +1,16 @@
+{
+  "messages": [
+    {
+      "id": "one-year-2027",
+      "from": "2027-11-05",
+      "until": "2028-01-31",
+      "eyebrow": "One year of CedarLogic",
+      "title": "It's been a whole year!",
+      "text": "Thank you so much for using CedarLogic! It really means a lot. If you have a couple of minutes, I'd love to hear how it's going and whether there's anything else you're looking for.",
+      "note": "Six quick questions, all optional. Opens in your browser.",
+      "button": "Fill Out the Form",
+      "later": 3,
+      "url": "https://cedarlogic.netlify.app/one-year/"
+    }
+  ]
+}

@@ -104,6 +104,7 @@ struct Prefs {
 	bool betaTester = false;
 	bool testingGroupNotice = false;   // made a beta tester that way: the updater says so once
 	std::string installedRelease;      // the versioned release the updater last installed, "<tag> <build>": never offered again
+	std::string shownMessages;         // the answers to messages from CedarLogic (Updater.cpp): what cl_message_remember keeps
 	bool hasSeenWelcome = false;
 	// Help > Show Me Around (ShowMeAround.h) has been finished or skipped once:
 	// until then it starts by itself (the Mac's cl.showMeAroundSeen).

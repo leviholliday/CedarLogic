@@ -88,6 +88,10 @@ endforeach()
 add_executable(thread_check ${ROOT}/mac/Tools/thread_check.cpp ${ROOT}/mac/CedarCore/SyncJson.cpp)
 target_link_libraries(thread_check PRIVATE CedarCoreHeadless)
 
+# A message from CedarLogic (AppMessage.h): which one is due, and what's refused.
+add_executable(message_check ${ROOT}/mac/Tools/message_check.cpp ${ROOT}/mac/CedarCore/AppMessage.cpp ${ROOT}/mac/CedarCore/SyncJson.cpp)
+target_include_directories(message_check PRIVATE ${ROOT}/mac/CedarCore ${ROOT}/mac/CedarCore/include)
+
 if(CL_LIBFUZZER)
 	add_executable(fuzz_load_libfuzzer ${ROOT}/mac/Tools/fuzz_load.cpp)
 	target_compile_definitions(fuzz_load_libfuzzer PRIVATE CL_LIBFUZZER)
@@ -111,6 +115,7 @@ add_test(NAME test_cmdserialize COMMAND test_cmdserialize)
 set(GATEDEFS ${ROOT}/res/cl_gatedefs.xml)
 file(GLOB FIXTURES ${ROOT}/format/tests/fixtures/*.cdl)
 add_test(NAME core_check COMMAND core_check ${GATEDEFS} ${ROOT}/format/tests/fixtures)
+add_test(NAME message_check COMMAND message_check ${ROOT}/docs/message.json)
 add_test(NAME thread_check COMMAND thread_check ${GATEDEFS} ${ROOT}/tests/check-sequential/cases.json 1 4)
 # Short fuzz runs, so a regression the long runs found once stays found. The
 # workflow runs longer ones as a step of its own.
