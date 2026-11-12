@@ -52,6 +52,7 @@
 #include <bcrypt.h>
 #include <winhttp.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <cstring>
@@ -843,6 +844,70 @@ void install(HWND parent, const Asset& asset) {
 
 // The window a check's answer goes over: the one Check Now was asked from
 // while it's there, else a circuit window with no dialog up.
+// ---- A message from CedarLogic (CedarMessage.h) ---------------------------------
+// After a background check finds CedarLogic up to date: message.json from the releases repo, next
+// to the releases, and the engine says whether one is due today: the form, Remind Me Later (again in
+// a few days) or No Thanks, kept in Prefs::shownMessages; it waits for any dialog or menu to close first.
+
+struct MessageFetch {
+	std::thread worker;
+	std::atomic<bool> done{ false };
+	std::string body;
+};
+std::unique_ptr<MessageFetch> g_message;
+
+void showMessageIfDue(HWND parent, const std::string& body) {
+	SYSTEMTIME now;
+	GetLocalTime(&now);
+	const std::string today = strf("%04d-%02d-%02d", now.wYear, now.wMonth, now.wDay);
+	CLAppMessage* m = cl_message_pick(body.data(), body.size(), today.c_str(), "windows", CL_VERSION, prefs().shownMessages.c_str());
+	if (!m) return;
+	// The Mac's three answers, on the app's own card: the form, Remind Me Later (Escape, or closing
+	// it), and No Thanks, apart on the left.
+	Alert a;
+	a.title = *m->eyebrow ? m->eyebrow : m->title;
+	a.heading = m->title;
+	a.text = std::string(m->text) + (*m->note ? std::string("\n\n") + m->note : std::string());
+	a.buttons = { { m->button, 1, 1 }, { "Remind Me Later", 2 }, { "No Thanks", 3, 0, true } };
+	a.enter = 1;
+	a.escape = 2;
+	const int answer = runAlert(parent, a);
+	if (char* kept = cl_message_remember(prefs().shownMessages.c_str(), m->id, today.c_str(), answer == 2 ? m->later : 0)) {
+		prefs().shownMessages = kept;
+		free(kept);
+		prefs().save();
+	}
+	const std::string link = m->link;
+	cl_message_free(m);
+	if (answer == 1) openExternally(parent, link);
+}
+
+void CALLBACK messageTimer(HWND, UINT, UINT_PTR id, DWORD) {
+	if (!g_message) { KillTimer(nullptr, id); return; }
+	if (!g_message->done.load()) return;
+	HWND parent = nullptr;
+	for (CircuitWindow* w : circuitWindows())
+		if (IsWindowEnabled(w->window())) { parent = w->window(); break; }
+	if (inTheMiddle(parent)) return;
+	KillTimer(nullptr, id);
+	g_message->worker.join();
+	const std::string body = std::move(g_message->body);
+	g_message.reset();
+	if (!body.empty() && parent) guarded("a message from CedarLogic", [parent, &body] { showMessageIfDue(parent, body); });
+}
+
+void checkMessage() {
+	if (g_message) return;
+	g_message.reset(new MessageFetch());
+	MessageFetch* f = g_message.get();
+	f->worker = std::thread([f] {
+		std::string body;
+		if (httpGet(CL_MESSAGE_URL, &body, std::string(), 16 * 1024)) f->body = std::move(body);
+		f->done.store(true);
+	});
+	SetTimer(nullptr, 0, 200, messageTimer);
+}
+
 HWND answerParent(const Check* c) {
 	if (c->parent && IsWindow(c->parent)) return c->parent;
 	for (CircuitWindow* w : circuitWindows())
@@ -917,6 +982,8 @@ void finish(HWND parent) {
 				            "This copy is newer than CedarLogic " + found.target.version +
 				                ", the newest normal release, so it stays as it is until a newer one is out.");
 			else showMessage(parent, Tone::Info, "CedarLogic is up to date", "You have the newest version.");
+		} else {
+			checkMessage();   // up to date: a message from CedarLogic, if one is due
 		}
 		return;
 	}
@@ -1410,6 +1477,11 @@ void noticeSeen() {
 }
 
 void shutdown() {
+	// (A message being fetched, the same.)
+	if (g_message) {
+		g_message->worker.detach();
+		(void)g_message.release();
+	}
 	if (!g_check) return;
 	// A check still on its way can't be waited for (a slow network takes a
 	// minute), and a std::thread left joinable when the statics go aborts

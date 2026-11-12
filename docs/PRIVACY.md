@@ -108,6 +108,18 @@ left is deleted entirely. Totals for each day, with no ids in them, are kept.
 - **Delete What's Been Sent...** does the same while leaving usage stats on;
   reports start again under a new id.
 
+## Updates and messages
+
+With **Check for updates automatically** on (Settings > General), the app
+looks for a new version once a day, on GitHub. When it finds none, it also
+reads one small file there, `message.json` in
+[CedarLogic-Releases](https://github.com/leviholliday/CedarLogic-Releases),
+which is how CedarLogic can say something to everyone once in a while (the
+first: a thank-you a year after 0.4, with a link to a short form). It's a
+plain download, like the update check: nothing about you or your computer is
+sent with it. A message is shown once, and links only to
+cedarlogic.netlify.app. With automatic checks off, neither happens.
+
 ## For labs and schools
 
 An administrator can turn either off for every user of a Mac with a managed

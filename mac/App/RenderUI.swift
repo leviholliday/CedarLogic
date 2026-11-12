@@ -145,6 +145,7 @@ enum RenderUI {
             if !dark {   // the welcome and tour are the brand look either way
                 for pg in 0..<WelcomeView.pages { save("welcome-\(pg)", WelcomeView(page: pg), width: 780, height: 580) }
                 for pg in 0..<WhatsNewView.pageCount { save("whatsnew-\(pg)", WhatsNewView(page: pg), width: 820, height: 600) }
+                save("message", MessageView(message: MessageView.preview, animate: false), width: MessageView.size.width, height: MessageView.size.height)
                 for st in [0, 8, 10] {
                     TourModel.shared.step = st
                     save("tour-\(st)", TourCard(canvas: canvas).padding(30).background(Color(white: 0.9)), width: 420)

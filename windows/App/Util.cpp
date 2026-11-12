@@ -311,6 +311,7 @@ void Prefs::loadFrom(const std::string& path, const std::string* marker) {
 		testingGroupNotice = betaTester;
 	}
 	installedRelease = r.s("installedRelease", "");
+	shownMessages = r.s("shownMessages", "");
 	hasSeenWelcome = r.b("hasSeenWelcome", hasSeenWelcome);
 	showMeAroundSeen = r.b("showMeAroundSeen", showMeAroundSeen);
 	firstLaunchPlayed = r.b("firstLaunchPlayed", firstLaunchPlayed);
@@ -460,6 +461,7 @@ std::string Prefs::text() const {
 	o << "testingGroup=" << (betaTester ? "beta" : "normal") << "\n";
 	o << "testingGroupNotice=" << b(testingGroupNotice) << "\n";
 	o << "installedRelease=" << installedRelease << "\n";
+	o << "shownMessages=" << shownMessages << "\n";
 	o << "hasSeenWelcome=" << b(hasSeenWelcome) << "\n";
 	o << "showMeAroundSeen=" << b(showMeAroundSeen) << "\n";
 	o << "firstLaunchPlayed=" << b(firstLaunchPlayed) << "\n";

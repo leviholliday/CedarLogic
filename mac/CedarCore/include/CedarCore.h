@@ -28,6 +28,7 @@ typedef cairo_t *CLContext;
 // Sync (SYNC.md): its own header, so the Linux and Windows apps can use it too.
 #include "CedarSync.h"
 #include "CedarClassroom.h"
+#include "CedarMessage.h"
 
 #ifdef __cplusplus
 extern "C" {

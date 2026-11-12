@@ -181,6 +181,7 @@ void Prefs::load() {
 		shortcuts = readString(k, "shortcuts", shortcuts);
 		checkUpdates = readBool(k, "checkUpdates", checkUpdates);
 		installedRelease = readString(k, "installedRelease", installedRelease);
+		shownMessages = readString(k, "shownMessages", shownMessages);
 		// The second round of the Mac's look: its status bar is on.
 		if (readInt(k, "prefsVersion", 1, 0, 100) < 2) showStatus = true;
 		tidyMode = readInt(k, "tidyMode", tidyMode, 0, 1);
@@ -305,6 +306,7 @@ void Prefs::save() const {
 	g_key_file_set_integer(k, kGroup, "updateChannel", updateChannel);
 	g_key_file_set_boolean(k, kGroup, "channelNotice", channelNotice);
 	g_key_file_set_string(k, kGroup, "installedRelease", installedRelease.c_str());
+	g_key_file_set_string(k, kGroup, "shownMessages", shownMessages.c_str());
 	g_key_file_set_integer(k, kGroup, "windowWidth", windowWidth);
 	g_key_file_set_integer(k, kGroup, "windowHeight", windowHeight);
 	g_key_file_set_boolean(k, kGroup, "windowMaximized", windowMaximized);

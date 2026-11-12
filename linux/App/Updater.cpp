@@ -36,6 +36,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <functional>
+#include <memory>
 #include <glib/gstdio.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
@@ -936,6 +937,66 @@ std::string takeChannelNotice() {
 	return kChannelNotice;
 }
 
+// ---- A message from CedarLogic (CedarMessage.h) ---------------------------------
+// After a background check finds no update: message.json from the releases repo, next to the
+// releases, and the engine says whether one is due today: the form, Remind Me Later (again in a
+// few days) or No Thanks, kept in Prefs::shownMessages; after any dialog that's open closes.
+
+struct MessageFetch {
+	GtkApplication* app;
+	std::thread worker;
+	std::atomic<bool> done{ false };
+	std::string body;
+};
+std::atomic<bool> g_messageLooking{ false };
+
+gboolean showMessageIfDue(gpointer data) {
+	MessageFetch* f = static_cast<MessageFetch*>(data);
+	if (!f->done.load()) return G_SOURCE_CONTINUE;
+	// Not over a dialog: after it.
+	if (!f->body.empty() && gtk_grab_get_current() != nullptr) return G_SOURCE_CONTINUE;
+	f->worker.join();
+	std::unique_ptr<MessageFetch> owned(f);
+	g_messageLooking.store(false);
+	GtkWindow* parent = gtk_application_get_active_window(f->app);
+	if (f->body.empty() || !parent) return G_SOURCE_REMOVE;
+	GDateTime* now = g_date_time_new_now_local();
+	gchar* day = g_date_time_format(now, "%Y-%m-%d");
+	g_date_time_unref(now);
+	const std::string today = day;
+	g_free(day);
+	CLAppMessage* m = cl_message_pick(f->body.data(), f->body.size(), today.c_str(), "linux", CL_VERSION, prefs().shownMessages.c_str());
+	if (!m) return G_SOURCE_REMOVE;
+	// The Mac's three answers, on the app's own card: the form, Remind Me Later (Esc, or closing it),
+	// and No Thanks, apart on the left.
+	Alert a;
+	a.title = *m->eyebrow ? m->eyebrow : m->title;
+	a.heading = m->title;
+	a.text = std::string(m->text) + (*m->note ? std::string("\n\n") + m->note : std::string());
+	a.buttons = { { m->button, 1, 1 }, { "Remind Me Later", 2 }, { "No Thanks", 3, 0, true } };
+	a.enter = 1;
+	a.escape = 2;
+	const int answer = runAlert(parent, a);
+	if (char* kept = cl_message_remember(prefs().shownMessages.c_str(), m->id, today.c_str(), answer == 2 ? m->later : 0)) {
+		prefs().shownMessages = kept;
+		free(kept);
+		prefs().save();
+	}
+	if (answer == 1) openExternally(parent, m->link);
+	cl_message_free(m);
+	return G_SOURCE_REMOVE;
+}
+
+void checkMessage(GtkApplication* app) {
+	if (g_messageLooking.exchange(true)) return;
+	MessageFetch* f = new MessageFetch{ app };
+	f->worker = std::thread([f] {
+		f->body = fetch(CL_MESSAGE_URL, 16 * 1024);
+		f->done.store(true);
+	});
+	g_timeout_add(200, showMessageIfDue, f);
+}
+
 gboolean pollCheck(gpointer data) {
 	CheckResult* r = static_cast<CheckResult*>(data);
 	if (!r->done.load()) return G_SOURCE_CONTINUE;
@@ -969,6 +1030,8 @@ gboolean pollCheck(gpointer data) {
 				showMessage(parent, GTK_MESSAGE_INFO, "You're up to date", "This is the latest version." + after);
 		} else if (!notice.empty()) {
 			if (!circuitWindows().empty()) circuitWindows().front()->note("Updates: Beta tester (from the test builds). Settings › General to change it");
+		} else if (o.fetched) {
+			checkMessage(r->app);   // up to date, and nothing else said: a message from CedarLogic, if one is due
 		}
 		delete r;
 		return G_SOURCE_REMOVE;

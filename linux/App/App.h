@@ -71,6 +71,8 @@ struct Prefs {
 	// The versioned release this copy's updater installed ("<tag> <build>"),
 	// so the same one is never offered again.
 	std::string installedRelease;
+	// The answers to messages from CedarLogic (Updater.cpp): what cl_message_remember keeps (CedarMessage.h).
+	std::string shownMessages;
 	int tidyMode = 0;             // what Shift+S does: 0 keeps the shape, 1 by signal flow
 	bool hasSeenWelcome = false;
 	int windowWidth = 1180, windowHeight = 780;
