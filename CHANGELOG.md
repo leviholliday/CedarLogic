@@ -4,6 +4,14 @@ What changed in each version of CedarLogic. The format follows [Keep a Changelog
 
 Versions 0.2 to 0.3.19 were Mac only. 0.4 is the first version for Mac, Windows and Linux together. Releases marked "beta" went to Beta testers first.
 
+## [0.4.2] - 2026-11-12
+
+A small update for Mac, Windows and Linux.
+
+### Added
+
+- **Messages from CedarLogic, once in a while.** After its daily check for updates finds none, CedarLogic reads one small file next to the updates (`message.json` in CedarLogic-Releases) and, on the day a message is due, shows it once, with **Remind Me Later** and **No Thanks**. Nothing about you is sent, messages only ever link to cedarlogic.netlify.app, and with automatic update checks off there are none. The first is planned for 5 November 2027. On the Mac it has a window of its own; on Windows and Linux it's the app's usual card. CedarLogic Online shows the same messages. (Mac, Windows, Linux)
+
 ## [0.4.1] - 2026-11-10
 
 A data-safety and privacy update for Mac, Windows and Linux.

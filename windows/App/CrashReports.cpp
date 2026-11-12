@@ -16,7 +16,7 @@
 #endif
 
 #ifndef CL_VERSION
-#define CL_VERSION "0.4.1"
+#define CL_VERSION "0.4.2"
 #endif
 #ifndef CL_BUILD_NUMBER
 #define CL_BUILD_NUMBER 0
