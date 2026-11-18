@@ -4,7 +4,7 @@ What changed in each version of CedarLogic. The format follows [Keep a Changelog
 
 Versions 0.2 to 0.3.19 were Mac only. 0.4 is the first version for Mac, Windows and Linux together. Releases marked "beta" went to Beta testers first.
 
-## [0.4.2] - 2026-11-12
+## [4.1] - 2026-11-18
 
 A small update for Mac, Windows and Linux.
 

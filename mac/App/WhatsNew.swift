@@ -11,8 +11,13 @@ import SwiftUI
 
 @MainActor
 enum WhatsNew {
-    /// Bumped when there's a new tour of what's new to give.
+    /// Bumped when there's a new tour of what's new to give. (A key, never shown: it stays "0.4",
+    /// the tour's own, through 4.1 and on, so nobody sees it or the full intro again.)
     static let version = "0.4"
+    /// The version as people see it, the intro's lit digits and the tour's title: this copy's own.
+    static var shownVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "4.1"
+    }
     private static let key = "cl.whatsNewSeen"
 
     /// Someone who's used CedarLogic before, and hasn't seen this one.
@@ -168,7 +173,7 @@ struct WhatsNewView: View {
         HStack(alignment: .center, spacing: 40) {
             VStack(alignment: .leading, spacing: 14) {
                 Text("WHAT'S NEW").font(.system(size: 11, weight: .bold)).kerning(1.8).foregroundStyle(Brand.neon)
-                Text("CedarLogic \(WhatsNew.version)").font(.system(size: 34, weight: .bold)).foregroundStyle(Brand.silver)
+                Text("CedarLogic \(WhatsNew.shownVersion)").font(.system(size: 34, weight: .bold)).foregroundStyle(Brand.silver)
                     .shadow(color: Brand.neon.opacity(0.3), radius: 10)
                 Text("Circuits you delete can come back, you can check your work and hand it in, and your circuits can follow you to your other devices. Here's what's new since 0.3, a couple of minutes' read.")
                     .font(.system(size: 14)).foregroundStyle(BrandText.secondary).fixedSize(horizontal: false, vertical: true)
@@ -286,7 +291,7 @@ struct WhatsNewView: View {
             Color.black.opacity(0.55).contentShape(Rectangle()).onTapGesture { panelChoice = false }
             VStack(alignment: .leading, spacing: 18) {
                 BrandHeading(eyebrow: "The Actions panel", title: "Yours to show or hide",
-                             line: "It\u{2019}s on for everyone in \(WhatsNew.version). Flip these to suit you; they change it straight away.")
+                             line: "It\u{2019}s on for everyone now. Flip these to suit you; they change it straight away.")
                 ActionsPanelChoice()
                 HStack {
                     Spacer()

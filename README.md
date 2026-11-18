@@ -17,7 +17,7 @@ It is one app on three computers: native apps for **Mac**, **Windows** and **Lin
 
 ## Install
 
-0.4 is the first version for Mac, Windows and Linux together. Every way below installs the same version, and the apps keep themselves up to date after that.
+CedarLogic is the same app on Mac, Windows and Linux. Every way below installs the newest version, and the apps keep themselves up to date after that.
 
 ### Mac
 
@@ -33,7 +33,7 @@ Needs macOS 14 Sonoma or later on Apple silicon (M1 or later). On an Intel Mac, 
 
 ### Windows
 
-In PowerShell (from 0.4's release day):
+In PowerShell:
 
 ```powershell
 irm https://cedarlogic.netlify.app/install.ps1 | iex
