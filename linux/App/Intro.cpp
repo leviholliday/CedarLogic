@@ -366,7 +366,10 @@ double easeInOut(double u) {
 }
 double fadeInShown(double t) { return easeInOut(t / kFadeIn); }
 
-const char* version() { return whatsnew::kVersion; }
+const char* version() {
+	static const std::string v = whatsnew::shownVersion();
+	return v.c_str();
+}
 
 bool dashRun() { return gDashArg; }
 

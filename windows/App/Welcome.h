@@ -76,6 +76,9 @@ void finishForTest(showme::WelcomeExit exit);
 // welcome; Help > What's New brings it back.
 namespace whatsnew {
 extern const char* const kVersion;
+// The version as people see it, CL_VERSION without a last ".0" ("4.1.0" -> "4.1"): the
+// intro's lit digits and the launch screen's title. (kVersion is a key, never shown.)
+std::string shownVersion();
 // If it hasn't been shown for this version. False when it wasn't shown.
 bool offer(CircuitWindow* window);
 void show(CircuitWindow* window, int page = 0);

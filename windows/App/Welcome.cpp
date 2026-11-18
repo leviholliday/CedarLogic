@@ -1395,7 +1395,13 @@ void finishForTest(showme::WelcomeExit exit) { finish(exit == showme::WelcomeExi
 
 namespace whatsnew {
 
-const char* const kVersion = "0.4";
+const char* const kVersion = "0.4";   // the tour's own, through 4.1 and on: nobody sees it or the full intro again
+
+std::string shownVersion() {
+	std::string v = CL_VERSION;
+	if (std::count(v.begin(), v.end(), '.') == 2 && v.size() > 2 && v.compare(v.size() - 2, 2, ".0") == 0) v.resize(v.size() - 2);
+	return v;
+}
 
 namespace {
 
@@ -1778,7 +1784,7 @@ void paintPanelCard(ID2D1RenderTarget* rt, WhatsNew* wn, float w, float h) {
 	// The card itself takes clicks (not "outside").
 	wn->panel.addHit(r, 0);
 	const float y = heading(rt, r.left + 28, r.top + 28, r.right - r.left - 56, "The Actions panel", "Yours to show or hide",
-	                        std::string("It\u2019s on for everyone in ") + kVersion + ". Flip these to suit you; they change it straight away.");
+	                        "It\u2019s on for everyone now. Flip these to suit you; they change it straight away.");
 	panelChoice(rt, wn->panel, r.left + 28, y + 18);
 	const D2D1_RECT_F done = D2D1::RectF(r.right - 28 - 110, r.bottom - 28 - 36, r.right - 28, r.bottom - 28);
 	button(rt, done, "Done", true, wn->panel.hot == kPanelDone);

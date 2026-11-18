@@ -1411,7 +1411,13 @@ void endTourNow() { endTour(); }
 
 namespace whatsnew {
 
-const char* const kVersion = "0.4";
+const char* const kVersion = "0.4";   // the tour's own, through 4.1 and on: nobody sees it or the full intro again
+
+std::string shownVersion() {
+	std::string v = CL_VERSION;
+	if (std::count(v.begin(), v.end(), '.') == 2 && v.size() > 2 && v.compare(v.size() - 2, 2, ".0") == 0) v.resize(v.size() - 2);
+	return v;
+}
 
 namespace {
 
@@ -1753,7 +1759,7 @@ void paint(cairo_t* cr, float w, float h) {
 		strokeRound(cr, rectF(card.left + 0.5f, card.top + 0.5f, card.right - 0.5f, card.bottom - 0.5f), 17.5f, colorF(1, 1, 1, 0.14f));
 		wn->panel.addHit(card, kCardBody);
 		const float y = heading(cr, card.left + 28, card.top + 28, rectWidth(card) - 56, "The Actions panel", "Yours to show or hide",
-		                        std::string("It\u2019s on for everyone in ") + kVersion + ". Flip these to suit you; they change it straight away.");
+		                        "It\u2019s on for everyone now. Flip these to suit you; they change it straight away.");
 		panelChoice(cr, wn->panel, card.left + 28, y + 18, kShowSwitch, kHoverSwitch);
 		const RectF done = rectF(card.right - 28 - 110, card.bottom - 28 - 36, card.right - 28, card.bottom - 28);
 		button(cr, done, "Done", true, wn->panel.hot == kCardDone);

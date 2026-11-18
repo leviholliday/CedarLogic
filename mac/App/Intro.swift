@@ -184,7 +184,8 @@ enum Intro {
     static let calmFade = 0.4
 
     /// The version the picture shows.
-    static var version: String { WhatsNew.version }
+    /// The digits the display spells (the app's version as people see it).
+    static var version: String { WhatsNew.shownVersion }
 
     /// Which intro the saved settings say this launch is owed (none in the
     /// usual case). The same test as the launch screen's first-launch look

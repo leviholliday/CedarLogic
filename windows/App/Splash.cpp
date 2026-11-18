@@ -110,7 +110,7 @@ struct Timeline {
 	void planIntro(bool shortIntro = false) {
 		afterIntro = true;
 		first = false;
-		title = std::string("CedarLogic ") + whatsnew::kVersion;
+		title = std::string("CedarLogic ") + whatsnew::shownVersion();
 		steps.clear();
 		steps.push_back({ -1000, "Ready", 1 });
 		readyAt = 0;

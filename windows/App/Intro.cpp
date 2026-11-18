@@ -472,7 +472,7 @@ Scene::~Scene() {
 // A seven-segment display beside the LED, in the outlines' style, that
 // spells the version as the LED lights, a digit at a time.
 void Scene::buildDisplay() {
-	const std::string version = whatsnew::kVersion;
+	const std::string version = whatsnew::shownVersion();
 	int count = 0;
 	for (char c : version) count += c >= '0' && c <= '9';
 	count = std::max(1, count);

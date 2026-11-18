@@ -426,7 +426,7 @@ void introRules() {
 	check(std::lround(intro::kTotal * 60) + 1 == 365, "intro: --render-intro draws 365 frames");
 	check(std::fabs(intro::kShortTotal - 3.55) < 0.005 && std::fabs(intro::kShortDissolveAt - 3.15) < 0.005 &&
 	          std::fabs(intro::lengthFor(intro::Trigger::Short) - 3.55) < 0.005 && std::fabs(intro::lengthFor(intro::Trigger::Every) - 6.07) < 0.005,
-	      strf("intro: the short intro is %.2f s, its bloom crossfading into the window from %.2f s (the LED and \"0.4\" at %.2f, the beat to %.2f)",
+	      strf("intro: the short intro is %.2f s, its bloom crossfading into the window from %.2f s (the LED and the version at %.2f, the beat to %.2f)",
 	           intro::kShortTotal, intro::kShortDissolveAt, intro::kLedAt, intro::kBloomAt));
 	check(std::lround(intro::kShortTotal * 60) + 1 == 214, "intro: --render-intro short draws 214 frames (0 to 213)");
 

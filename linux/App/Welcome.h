@@ -40,6 +40,9 @@ void closeForCheck(int choice);
 // New brings it back.
 namespace whatsnew {
 extern const char* const kVersion;
+// The version as people see it, CL_VERSION without a last ".0" ("4.1.0" -> "4.1"): the
+// intro's lit digits and the launch screen's title. (kVersion is a key, never shown.)
+std::string shownVersion();
 bool offer(CircuitWindow* window);
 // `panelCard`: with the Actions panel's switches open over the page.
 void show(CircuitWindow* window, int page = 0, bool panelCard = false);
