@@ -220,3 +220,43 @@ TEST_CASE("grid: a wide page of long wires routes every wire, the same way twice
 	}
 	CHECK(a.overlaps == b.overlaps);
 }
+
+TEST_CASE("grid: a pin with a neighbor's edge across its way out steps off it, not round the far side") {
+	GridInput in;
+	// The pin leaves its own gate to the right, and another gate's bottom edge
+	// lies on that very line: walking on through it used to bring the wire out
+	// on the far side, past the pin it was going to.
+	in.obstacles = { { 0, 0, 4, 2 }, { 4.2f, 1, 9, 3 }, { 8, -4, 12, 0 } };
+	GridNet net;
+	net.pins = { { 4, 1, 1, 0 }, { 8, -2, -1, 0 } };
+	in.nets = { net };
+	GridOutput out = routeGrid(in);
+	REQUIRE(out.ok.size() == 1);
+	REQUIRE(out.ok[0]);
+	CHECK(out.jammed[0]);
+	CHECK_FALSE(out.forced[0]);
+	CHECK(validTree(out.routes[0], 2));
+	float len = 0.0f;
+	for (const Segment &sg : out.routes[0].segments) len += std::fabs(sg.ex - sg.bx) + std::fabs(sg.ey - sg.by);
+	CHECK(len <= 7.0f + E);   // straight there: 4 across, 3 down
+}
+
+TEST_CASE("grid: a pin pointing into the gate stacked on it runs straight through to that gate's pin on the same wire") {
+	GridInput in;
+	// Two gates stacked edge to edge, each with a pin in the middle of its top
+	// (tri-state buffers and their enable pins): the lower pin points into the
+	// upper gate, whose own pin on the same wire is straight above.
+	in.obstacles = { { 0, 0, 4, 2 }, { 0, 2, 4, 4 } };
+	GridNet net;
+	net.pins = { { 2, 2, 0, 1 }, { 2, 4, 0, 1 } };
+	in.nets = { net };
+	GridOutput out = routeGrid(in);
+	REQUIRE(out.ok.size() == 1);
+	REQUIRE(out.ok[0]);
+	CHECK_FALSE(out.jammed[0]);
+	CHECK(validTree(out.routes[0], 2));
+	for (const Segment &sg : out.routes[0].segments) {
+		CHECK(sg.vertical);
+		CHECK(sg.bx == doctest::Approx(2.0f));
+	}
+}

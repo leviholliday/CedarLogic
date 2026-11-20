@@ -48,6 +48,30 @@ TEST_CASE("layout keep: gates overlapping in a column are spread apart") {
 		for (size_t j = i + 1; j < 3; j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
 }
 
+TEST_CASE("layout keep: a part sitting on its own driver goes sideways, level, not down") {
+	LayoutInput in;
+	// a switch, and the label it feeds drawn on top of it: the label's input pin
+	// (x = 1) is left of the switch's output pin (x = 3)
+	LayoutNode sw = box(0, 0, 3, 2);     sw.pins = { pin(3, 1, 1, 0, true) };
+	LayoutNode lab = box(1, 0, 4, 2);    lab.pins = { pin(1, 1, -1, 0, false) };
+	in.nodes = { sw, lab };
+	auto off = layoutGates(in);
+	REQUIRE(off.size() == 2);
+	CHECK_FALSE(overlap(in.nodes[0], off[0], in.nodes[1], off[1]));
+	// level with the driver (the wire runs straight), and with room for the wire
+	CHECK(1.0f + off[1].second == doctest::Approx(1.0f + off[0].second));
+	CHECK(1.0f + off[1].first >= 3.0f + off[0].first + 2.0f - 1e-3f);
+	for (auto &o : off) { CHECK(onGrid(o.first)); CHECK(onGrid(o.second)); }
+}
+
+TEST_CASE("layout keep: two overlapping parts that are not wired together still separate downwards") {
+	LayoutInput in;
+	in.nodes = { box(0, 0, 3, 2), box(1, 0, 4, 2) };
+	auto off = layoutGates(in);
+	CHECK_FALSE(overlap(in.nodes[0], off[0], in.nodes[1], off[1]));
+	CHECK(off[1].first == doctest::Approx(off[0].first));
+}
+
 TEST_CASE("layout rearrange: a chain placed backwards comes out left to right") {
 	LayoutInput in;
 	in.mode = TidyMode::Rearrange;
@@ -218,4 +242,60 @@ TEST_CASE("layout rearrange: the same input gives the same answer") {
 	LayoutInput in = keypadInverters();
 	auto a = layoutGates(in), b = layoutGates(in);
 	CHECK(a == b);
+}
+
+TEST_CASE("layout keep: a label left behind the pin it feeds goes in front of it") {
+	LayoutInput in;
+	// a display with its input pin on the left (x = 10), and the label that
+	// drives it sitting below, its output pin (x = 12) past the display's pin:
+	// the wire would have to leave right, turn back and come round.
+	LayoutNode disp = box(10, 0, 4, 6);    disp.pins = { pin(10, 3, -1, 0, false), pin(10, 5, -1, 1, false) };
+	LayoutNode lab = box(8, -3, 4, 2);     lab.pins = { pin(12, -2, 1, 0, true) };
+	LayoutNode other = box(0, 4, 4, 2);    other.pins = { pin(4, 5, 1, 1, true) };
+	in.nodes = { disp, lab, other };
+	auto off = layoutGates(in);
+	REQUIRE(off.size() == 3);
+	// the display stays; the label ends up left of the display's pin with room, level with it
+	CHECK(off[0].first == doctest::Approx(0.0f));
+	CHECK(12.0f + off[1].first <= 10.0f + off[0].first - 2.0f + 1e-3f);
+	CHECK(-2.0f + off[1].second == doctest::Approx(3.0f + off[0].second));
+	CHECK_FALSE(overlap(in.nodes[0], off[0], in.nodes[1], off[1]));
+	for (auto &o : off) { CHECK(onGrid(o.first)); CHECK(onGrid(o.second)); }
+}
+
+TEST_CASE("layout keep: a label already in front of its pin, however close, is left alone") {
+	LayoutInput in;
+	LayoutNode disp = box(10, 0, 4, 6);    disp.pins = { pin(10, 3, -1, 0, false) };
+	LayoutNode lab = box(5, -3, 4, 2);     lab.pins = { pin(9, -2, 1, 0, true) };   // 1 ahead, 5 off level
+	in.nodes = { disp, lab };
+	auto off = layoutGates(in);
+	CHECK(off[1].first == doctest::Approx(0.0f));
+	CHECK(off[1].second == doctest::Approx(0.0f));
+}
+
+TEST_CASE("layout keep: labels stacked beside a part in the wrong order trade places") {
+	LayoutInput in;
+	// a counter with outputs at y = 5 (net 0) and y = 3 (net 1); two labels
+	// stacked to its right, the top one wired to the lower output
+	LayoutNode ctr = box(0, 0, 6, 8);     ctr.pins = { pin(6, 5, 1, 0, true), pin(6, 3, 1, 1, true) };
+	LayoutNode top = box(8, 4, 4, 2);     top.pins = { pin(8, 5, -1, 1, false) };
+	LayoutNode bot = box(8, 2, 4, 2);     bot.pins = { pin(8, 3, -1, 0, false) };
+	in.nodes = { ctr, top, bot };
+	auto off = layoutGates(in);
+	REQUIRE(off.size() == 3);
+	// each label ends up level with its own output, in the other's old spot
+	CHECK(5.0f + off[1].second == doctest::Approx(3.0f + off[0].second));
+	CHECK(3.0f + off[2].second == doctest::Approx(5.0f + off[0].second));
+	CHECK(off[1].first == doctest::Approx(off[2].first));
+	CHECK_FALSE(overlap(in.nodes[1], off[1], in.nodes[2], off[2]));
+}
+
+TEST_CASE("layout keep: labels already in the order of the pins stay where they are") {
+	LayoutInput in;
+	LayoutNode ctr = box(0, 0, 6, 8);     ctr.pins = { pin(6, 5, 1, 0, true), pin(6, 3, 1, 1, true) };
+	LayoutNode top = box(8, 4, 4, 2);     top.pins = { pin(8, 5, -1, 0, false) };
+	LayoutNode bot = box(8, 2, 4, 2);     bot.pins = { pin(8, 3, -1, 1, false) };
+	in.nodes = { ctr, top, bot };
+	auto off = layoutGates(in);
+	for (auto &o : off) { CHECK(o.first == doctest::Approx(0.0f)); CHECK(o.second == doctest::Approx(0.0f)); }
 }

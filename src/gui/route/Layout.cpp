@@ -18,6 +18,10 @@ const float LAYER_GAP_Y = 1.0f;      // Rearrange: room between gates in a colum
 const float ALIGN_REACH = 1.5f;      // Keep Layout: furthest a gate moves to line a wire up
 const float NUDGE = 1.0f;            // Keep Layout: furthest a gate moves to line up a stack
 const float STACK_GAP = 3.0f;        // Keep Layout: most room between gates in one stack
+const float LEAD = 2.0f;             // Keep Layout: room between a driver's pin and the pin it feeds when two parts that overlap are wired together
+const float SEAT_REACH = 8.0f;       // Keep Layout: a stray label or switch is put beside the pin it's wired to only from this close
+const int SEAT_ROWS = 8;             // ...and at most this many steps off level, or
+const int SEAT_COLS = 6;             // this many further out, when the level spot is taken
 const float BLOCK_GAP = 1.5f;        // Rearrange: room kept between separate circuits
 const float PIN_OFFSET = 1.5f;        // Rearrange: how far an up/down pin sits off its wire
 const int PICTURE_PARTS = 4;         // this many overlapping parts are a drawing
@@ -575,6 +579,8 @@ private:
 				if (std::fabs(target - edge[k]) <= NUDGE + EPS) ox[col[k]] += snap(target - edge[k]);
 		}
 
+		orderLeaves(mv);
+
 		// Level each gate with what it's wired to, drivers first, so wires that
 		// miss by a step or three run straight.
 		std::vector<int> byX = mv;
@@ -584,8 +590,16 @@ private:
 			oy[j] += bestShift(j, std::set<int>(mine.begin(), mine.end()));
 		}
 
-		// No two gates overlap afterwards: push the lower one down.
-		for (int pass = 0; pass < 8; pass++) {
+		separate(mv);
+		if (seatLeaves(mv)) separate(mv);
+		// Again now nothing overlaps: parts pushed clear of each other land
+		// stacked in whatever order they were dropped.
+		orderLeaves(mv);
+	}
+
+	// No two gates overlap afterwards: push the lower one down.
+	void separate(const std::vector<int> &mv) {
+		for (int pass = 0; pass < 16; pass++) {
 			bool moved = false;
 			std::vector<int> byTop = mv;
 			std::sort(byTop.begin(), byTop.end(), [&](int a, int b) { return T(a) > T(b); });
@@ -595,12 +609,149 @@ private:
 					// Real overlaps only: parts drawn edge to edge (a stack of
 					// input labels) are meant to touch.
 					const bool hits = L(i) < R(j) - EPS && L(j) < R(i) - EPS && B(i) < T(j) - EPS && B(j) < T(i) - EPS;
-					if (hits) { oy[j] -= snapUp(T(j) - B(i)); moved = true; }
+					if (!hits) continue;
+					// Two parts wired straight to each other (a switch on top of its
+					// label, say): the one that is fed goes to the right of its driver,
+					// level, so the wire runs straight. Moving it down instead leaves
+					// the wire running backwards, and the router has to loop it round.
+					int src = -1, dst = -1;
+					float need = 0.0f;
+					if (backwardLink(i, j, src, dst, need) || backwardLink(j, i, src, dst, need)) { ox[dst] += snapUp(need); moved = true; continue; }
+					oy[j] -= snapUp(T(j) - B(i)); moved = true;
 				}
 			if (!moved) break;
 		}
 	}
 
+	// How many of a part's pins are wired; `pin` is the last of them.
+	int wires(int v, int &pin) const {
+		int count = 0;
+		for (size_t k = 0; k < in.nodes[v].pins.size(); k++)
+			if (in.nodes[v].pins[k].net >= 0) { count++; pin = (int)k; }
+		return count;
+	}
+
+	// Labels (or switches, lights) stacked in a column beside the part they
+	// are each wired to, in a different order from its pins: their wires have
+	// to cross in the gap between, where there's room for one to and not two,
+	// and the second is sent right round the column. They trade places -- the
+	// same spots, in the order of the pins.
+	void orderLeaves(const std::vector<int> &mv) {
+		struct Leaf { int v; float pinX, pinY; };   // its pin's x, the y of the pin it's wired to
+		std::map<std::pair<int, int>, std::vector<Leaf>> sides;   // (part, side of it) -> leaves there
+		for (int v : mv) {
+			int pi = -1;
+			if (wires(v, pi) != 1) continue;
+			const LayoutPin &p = in.nodes[v].pins[pi];
+			if (p.dx == 0) continue;
+			const auto &np = netPins[p.net];
+			if (np.size() != 2) continue;
+			const std::pair<int, int> &o = np[0].first == v ? np[1] : np[0];
+			if (o.first == v) continue;
+			const LayoutPin &q = in.nodes[o.first].pins[o.second];
+			if (q.dx != -p.dx || ((q.x + ox[o.first]) - (p.x + ox[v])) * p.dx <= EPS) continue;
+			sides[{ o.first, q.dx }].push_back({ v, p.x + ox[v], q.y + oy[o.first] });
+		}
+		for (auto &sd : sides) {
+			std::vector<Leaf> &all = sd.second;
+			std::sort(all.begin(), all.end(), [&](const Leaf &a, const Leaf &b) { return T(a.v) > T(b.v); });
+			for (size_t i = 0; i < all.size();) {
+				// A run: same size, pins in one column, one right under the next.
+				size_t j = i;
+				while (j + 1 < all.size()) {
+					const int a = all[j].v, b = all[j + 1].v;
+					const float gap = B(a) - T(b);
+					if (std::fabs(W(a) - W(b)) > EPS || std::fabs(H(a) - H(b)) > EPS || std::fabs(all[j].pinX - all[j + 1].pinX) > EPS ||
+					    gap < -EPS || gap > STACK_GAP + EPS) break;
+					j++;
+				}
+				if (j > i) {
+					std::vector<Leaf> want(all.begin() + i, all.begin() + j + 1);
+					std::stable_sort(want.begin(), want.end(), [](const Leaf &a, const Leaf &b) { return a.pinY > b.pinY + EPS; });
+					std::vector<std::pair<float, float>> spot;
+					for (size_t k = i; k <= j; k++) spot.push_back({ L(all[k].v), B(all[k].v) });
+					for (size_t k = 0; k < want.size(); k++) {
+						const int v = want[k].v;
+						const float dx = spot[k].first - L(v), dy = spot[k].second - B(v);
+						ox[v] += dx; oy[v] += dy;
+					}
+				}
+				i = j + 1;
+			}
+		}
+	}
+
+	// A part with one wire (a label, a switch, a light) left on the wrong side
+	// of the pin it's wired to -- its wire would have to leave it, turn back
+	// and loop round to come in from the front. It goes to the nearest free
+	// spot in front of that pin instead, level with it when there's room.
+	bool seatLeaves(const std::vector<int> &mv) {
+		bool any = false;
+		for (int v : mv) {
+			int pi = -1;
+			if (wires(v, pi) != 1) continue;
+			const LayoutPin &p = in.nodes[v].pins[pi];
+			if (p.dx == 0) continue;
+			const float px = p.x + ox[v], py = p.y + oy[v];
+			// The pins facing this one on its wire: fine if any is ahead of it.
+			int best = -1, bestPin = -1;
+			float bestD = FLT_MAX, bestGap = 0.0f;
+			bool ahead = false;
+			for (const auto &qq : netPins[p.net]) {
+				if (qq.first == v) continue;
+				const LayoutPin &q = in.nodes[qq.first].pins[qq.second];
+				if (q.dx != -p.dx) continue;
+				const float qx = q.x + ox[qq.first], qy = q.y + oy[qq.first];
+				const float gap = (qx - px) * p.dx;
+				// Ahead with room for the wire to turn, or touching and level.
+				if (gap >= 2 * in.step - EPS || (gap > -EPS && std::fabs(qy - py) < EPS)) { ahead = true; break; }
+				const float d = std::fabs(qx - px) + std::fabs(qy - py);
+				if (d < bestD) { bestD = d; best = qq.first; bestPin = qq.second; bestGap = gap; }
+			}
+			if (ahead || best < 0 || bestD > SEAT_REACH) continue;
+			// Two such parts wired to each other: the one that is fed moves.
+			int other = -1;
+			if (p.output && movable[best] && wires(best, other) == 1) continue;
+			const LayoutPin &q = in.nodes[best].pins[bestPin];
+			const float sx = -p.dx * snapUp(LEAD - bestGap);
+			const float sy = snap((q.y + oy[best]) - py);
+			bool placed = false;
+			for (int cost = 0; cost <= SEAT_ROWS + 2 * SEAT_COLS && !placed; cost++)
+				for (int col = 0; col <= SEAT_COLS && 2 * col <= cost && !placed; col++) {
+					const int row = cost - 2 * col;
+					if (row > SEAT_ROWS) continue;
+					for (int sgn = 1; sgn >= (row == 0 ? 1 : -1) && !placed; sgn -= 2) {
+						const float dx = sx - p.dx * col * in.step, dy = sy + sgn * row * in.step;
+						const float l = L(v) + dx, r = R(v) + dx, b = B(v) + dy, t = T(v) + dy;
+						bool free = true;
+						for (size_t j = 0; j < n && free; j++) {
+							if ((int)j == v) continue;
+							if (l < R((int)j) - EPS && L((int)j) < r - EPS && b < T((int)j) - EPS && B((int)j) < t - EPS) free = false;
+						}
+						if (!free) continue;
+						ox[v] += dx; oy[v] += dy;
+						placed = any = true;
+					}
+				}
+		}
+		return any;
+	}
+
+
+	// True when `a` drives a pin of `b` that sits left of (or too close to the
+	// right of) the driving pin: `need` is how far `b` has to go right for the
+	// wire to have LEAD between the two pins.
+	bool backwardLink(int a, int b, int &src, int &dst, float &need) const {
+		for (const LayoutPin &pa : in.nodes[a].pins) {
+			if (!pa.output || pa.dx <= 0 || pa.net < 0) continue;
+			for (const LayoutPin &pb : in.nodes[b].pins) {
+				if (pb.output || pb.dx >= 0 || pb.net != pa.net) continue;
+				const float gap = (pb.x + ox[b]) - (pa.x + ox[a]);
+				if (gap < LEAD - EPS) { src = a; dst = b; need = LEAD - gap; return true; }
+			}
+		}
+		return false;
+	}
 
 	// The move (within ALIGN_REACH, in grid steps) that lines up the most of
 	// this gate's pins with the pins they're wired to across the way; 0 unless
