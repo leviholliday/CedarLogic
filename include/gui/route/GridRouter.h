@@ -76,6 +76,14 @@ struct GridOutput {
 	// caller had; routes[i] is empty then.
 	std::vector<bool> ok;
 	std::vector<RouteResult> routes;
+	// Per net: true when another gate's body sits right across the way out of
+	// one of its pins (parts jammed together); its route starts with a step
+	// along or into that body.
+	std::vector<bool> jammed;
+	// Per net: true when it only routed with gate bodies passable -- the route
+	// may run through one. The caller may prefer the shape the wire was drawn
+	// with.
+	std::vector<bool> forced;
 	// Nodes two routed wires still share on the same line (0 when clean).
 	int overlaps = 0;
 };

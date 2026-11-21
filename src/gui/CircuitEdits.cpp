@@ -296,27 +296,67 @@ std::vector<WireReshape> rerouteWires(GUICanvas* page, const std::vector<unsigne
 		}
 	}
 
-	const GridOutput out = routeGrid(in);
+	GridOutput out = routeGrid(in);
+
+	// A wire whose pin is jammed against a neighboring part, with no way out
+	// but through a part: when its parts stayed where they were, the shape it
+	// was drawn with is the best there is (wires drawn across a display made
+	// of packed lights, or straight down a stack of gates).
+	std::vector<char> moved(wires.size(), 0), sound(wires.size(), 0);
+	for (size_t k = 0; k < wires.size(); k++) {
+		if (movedGates != nullptr)
+			for (const wireConnection& c : wires[k]->getConnections()) if (movedGates->count(c.gid)) moved[k] = 1;
+		sound[k] = shapeIsSound(page, wires[k], wires[k]->getSegmentMap()) ? 1 : 0;
+	}
+	auto keepsDrawn = [&](size_t k) {
+		return out.jammed[k] && (!out.ok[k] || out.forced[k]) && !moved[k] && sound[k];
+	};
+	// The rest are routed again around those, as wires that stay put: left
+	// out, the others would be laid along them.
+	std::vector<char> kept(wires.size(), 0);
+	bool anyKept = false;
+	for (size_t k = 0; k < wires.size(); k++) if (keepsDrawn(k)) { kept[k] = 1; anyKept = true; }
+	if (anyKept) {
+		GridInput rest = in;
+		rest.nets.clear();
+		std::vector<size_t> index;
+		for (size_t k = 0; k < wires.size(); k++) {
+			if (!kept[k]) { rest.nets.push_back(in.nets[k]); index.push_back(k); continue; }
+			for (const auto& seg : wires[k]->getSegmentMap()) {
+				GridFixedSeg f;
+				f.bx = seg.second.begin.x; f.by = seg.second.begin.y;
+				f.ex = seg.second.end.x;   f.ey = seg.second.end.y;
+				rest.fixed.push_back(f);
+			}
+		}
+		GridOutput again = routeGrid(rest);
+		for (size_t i = 0; i < index.size(); i++) {
+			const size_t k = index[i];
+			out.ok[k] = again.ok[i];
+			out.routes[k] = std::move(again.routes[i]);
+			out.jammed[k] = again.jammed[i];
+			out.forced[k] = again.forced[i];
+		}
+	}
+
 	for (size_t k = 0; k < wires.size(); k++) {
 		guiWire* w = wires[k];
 		const auto before = w->getSegmentMap();
+		const bool gatesMoved = moved[k] != 0, beforeSound = sound[k] != 0;
+		const bool keepDrawn = kept[k] || keepsDrawn(k);
 		bool routed = false;
-		if (out.ok[k]) {
+		if (out.ok[k] && !keepDrawn) {
 			w->adoptRoute(out.routes[k]);
 			routed = !w->getSegmentMap().empty();
 			if (!routed) w->setSegmentMap(before);
 		}
-		if (!routed) straightenWireAvoiding(page, w);
+		if (!routed && !keepDrawn) straightenWireAvoiding(page, w);
 		// Never trade a wire for a much longer one: a shape drawn to run along
 		// packed parts (a 7-segment display) would otherwise be sent the long
 		// way round. Only when its gates stayed put -- if they moved, the old
 		// shape no longer fits anyway.
-		bool gatesMoved = false;
-		if (movedGates != nullptr)
-			for (const wireConnection& c : w->getConnections()) if (movedGates->count(c.gid)) gatesMoved = true;
 		// A shape that misses a pin or falls apart is never kept: try the
 		// simple route, and failing that the old shape if that one was sound.
-		const bool beforeSound = shapeIsSound(page, w, before);
 		if (!shapeIsSound(page, w, w->getSegmentMap())) {
 			if (routed) straightenWireAvoiding(page, w);
 			if (!shapeIsSound(page, w, w->getSegmentMap()) && beforeSound) w->setSegmentMap(before);

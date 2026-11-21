@@ -15,7 +15,8 @@
 //     last; gates ordered within a column to cut crossings, with labels,
 //     keypads and displays kept in drawn order; a wire passing a column
 //     keeps a lane through it; then each gate placed level with what it
-//     connects to where the column has room.
+//     connects to where the column has room. A caption (unwired text drawn
+//     right beside a part) moves with that part, which keeps room for it.
 //
 // Pure: no wx, no engine. Unit-tested in test_route.
 

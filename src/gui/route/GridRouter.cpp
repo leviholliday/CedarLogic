@@ -16,6 +16,7 @@ namespace route {
 namespace {
 
 const float EPS = 1e-3f;
+const float OWN_EPS = 0.05f;        // a pin this close to a footprint is on it
 
 // Prices, in grid steps of wire length. Tuned for looks: a crossing is worth a
 // long detour, a bend a short one, and lying on another wire's line (which
@@ -172,12 +173,14 @@ private:
 		int stub = -1;
 		int dir = NONE;
 		std::vector<int> walk;   // pin .. stub, the forced way out of the gate
+		bool jammed = false;     // a neighbor's body right across the way out
 	};
 	struct NetState {
 		std::set<long long> edges;
 		std::vector<int> nodesH, nodesV;
 		float cost = 0.0f;
 		bool ok = false;
+		bool relaxed = false;   // routed with gate bodies passable (at a price)
 	};
 
 	const GridInput &in;
@@ -228,7 +231,7 @@ private:
 	}
 
 	bool build();
-	void markPin(int k, const GridPin &p, PinInfo &info);
+	void markPin(int k, const GridPin &p, PinInfo &info, const std::vector<int> &netNodes, int self);
 	float moveCost(int k, int from, int arrived, int d, int to, bool goal, bool relaxed) const;
 	bool passable(int k, int n, bool relaxed) const;
 	bool goalNode(int n) const { return inTree[n] && !channel[n]; }
@@ -311,7 +314,12 @@ bool Router::build() {
 	pins.assign(in.nets.size(), {});
 	for (size_t k = 0; k < in.nets.size(); k++) {
 		pins[k].resize(in.nets[k].pins.size());
-		for (size_t i = 0; i < in.nets[k].pins.size(); i++) markPin((int)k, in.nets[k].pins[i], pins[k][i]);
+		std::vector<int> netNodes(in.nets[k].pins.size(), -1);   // where the net's pins sit
+		for (size_t i = 0; i < in.nets[k].pins.size(); i++) {
+			const int ix = findLine(xs, in.nets[k].pins[i].x), iy = findLine(ys, in.nets[k].pins[i].y);
+			if (ix >= 0 && iy >= 0) netNodes[i] = node(ix, iy);
+		}
+		for (size_t i = 0; i < in.nets[k].pins.size(); i++) markPin((int)k, in.nets[k].pins[i], pins[k][i], netNodes, (int)i);
 	}
 	// Pins nobody here routes: close the spot right outside the tip (a wire
 	// through it would look attached) and charge for brushing past.
@@ -335,7 +343,7 @@ bool Router::build() {
 	return true;
 }
 
-void Router::markPin(int k, const GridPin &p, PinInfo &info) {
+void Router::markPin(int k, const GridPin &p, PinInfo &info, const std::vector<int> &netNodes, int self) {
 	const int ix = findLine(xs, p.x), iy = findLine(ys, p.y);
 	if (ix < 0 || iy < 0) return;
 	info.node = node(ix, iy);
@@ -344,8 +352,39 @@ void Router::markPin(int k, const GridPin &p, PinInfo &info) {
 	info.walk.push_back(info.node);
 	if (info.dir != NONE) {
 		// Out through the gate body to the first open node, at least one step.
+		// Only through the pin's own gate, though: when the way out runs into a
+		// neighbor (a part pushed up against this one, its edge on the pin's
+		// line), walking on would bring the wire out on that part's far side,
+		// past the pin it was going to, and send it the long way round. The
+		// wire starts from that first step instead and finds its own way off
+		// the neighbor -- one step along its edge, usually. Unless the walk
+		// comes to another pin of the same wire on the way (gates stacked so
+		// one's enable pin points at the next one's): straight through is how
+		// that is drawn.
+		// (Its own gate is one the pin is on or in -- not one it merely touches
+		// from outside, the pin's tip on the edge the wire would go in by.)
+		std::vector<const GridRect *> own;
+		for (const GridRect &r : in.obstacles) {
+			if (!(p.x >= r.l - OWN_EPS && p.x <= r.r + OWN_EPS && p.y >= r.b - OWN_EPS && p.y <= r.t + OWN_EPS)) continue;
+			const bool entering = (info.dir == PX && std::fabs(p.x - r.l) < OWN_EPS) || (info.dir == NXD && std::fabs(p.x - r.r) < OWN_EPS) ||
+			                      (info.dir == PY && std::fabs(p.y - r.b) < OWN_EPS) || (info.dir == NYD && std::fabs(p.y - r.t) < OWN_EPS);
+			if (!entering) own.push_back(&r);
+		}
+		auto inOwn = [&](int m2) {
+			if (own.empty()) return true;   // a pin off every footprint: as before
+			const float x = xs[ixOf(m2)], y = ys[iyOf(m2)];
+			for (const GridRect *r : own)
+				if (x >= r->l - OWN_EPS && x <= r->r + OWN_EPS && y >= r->b - OWN_EPS && y <= r->t + OWN_EPS) return true;
+			return false;
+		};
+		bool meets = false;
+		for (int m2 = info.node; m2 >= 0 && (m2 == info.node || blocked[m2]) && !meets; m2 = stepFrom(m2, info.dir))
+			for (size_t j = 0; j < netNodes.size(); j++) if ((int)j != self && netNodes[j] == m2) meets = true;
 		int n = stepFrom(info.node, info.dir);
-		while (n >= 0 && blocked[n]) { info.walk.push_back(n); n = stepFrom(n, info.dir); }
+		while (n >= 0 && blocked[n]) {
+			if (!meets && !inOwn(n)) { info.jammed = true; break; }
+			info.walk.push_back(n); n = stepFrom(n, info.dir);
+		}
 		if (n >= 0) info.walk.push_back(n);
 		else { info.walk.resize(1); info.dir = NONE; }
 	}
@@ -568,6 +607,7 @@ bool Router::routeNet(int k, bool relaxed) {
 	ns.nodesH.assign(h.begin(), h.end());
 	ns.nodesV.assign(v.begin(), v.end());
 	ns.ok = true;
+	ns.relaxed = relaxed;
 	nets[k] = std::move(ns);
 	resetTree();
 	return true;
@@ -652,6 +692,8 @@ GridOutput Router::run() {
 	const size_t K = in.nets.size();
 	out.ok.assign(K, false);
 	out.routes.assign(K, RouteResult());
+	out.jammed.assign(K, false);
+	out.forced.assign(K, false);
 	if (K == 0 || !build()) return out;
 	nets.assign(K, NetState());
 
@@ -714,6 +756,10 @@ GridOutput Router::run() {
 		}
 	}
 	nets = best;
+	for (size_t k = 0; k < K; k++) {
+		for (const PinInfo &pi : pins[k]) if (pi.jammed) out.jammed[k] = true;
+		out.forced[k] = nets[k].ok && nets[k].relaxed;
+	}
 	out.overlaps = bestOverlaps == 0x7fffffff ? 0 : bestOverlaps;
 	for (size_t k = 0; k < K; k++) {
 		if (!nets[k].ok) continue;

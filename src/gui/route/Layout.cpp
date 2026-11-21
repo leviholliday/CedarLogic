@@ -18,6 +18,10 @@ const float LAYER_GAP_Y = 1.0f;      // Rearrange: room between gates in a colum
 const float ALIGN_REACH = 1.5f;      // Keep Layout: furthest a gate moves to line a wire up
 const float NUDGE = 1.0f;            // Keep Layout: furthest a gate moves to line up a stack
 const float STACK_GAP = 3.0f;        // Keep Layout: most room between gates in one stack
+const float LEAD = 2.0f;             // Keep Layout: room between a driver's pin and the pin it feeds when two parts that overlap are wired together
+const float SEAT_REACH = 8.0f;       // Keep Layout: a stray label or switch is put beside the pin it's wired to only from this close
+const int SEAT_ROWS = 8;             // ...and at most this many steps off level, or
+const int SEAT_COLS = 6;             // this many further out, when the level spot is taken
 const float BLOCK_GAP = 1.5f;        // Rearrange: room kept between separate circuits
 const float PIN_OFFSET = 1.5f;        // Rearrange: how far an up/down pin sits off its wire
 const int PICTURE_PARTS = 4;         // this many overlapping parts are a drawing
@@ -27,6 +31,9 @@ const float LANE = 1.0f;             // Rearrange: room a passing wire keeps in 
 const float GROUP_GAP = 3.0f;        // Rearrange: a gap this wide between drawn groups splits them
 const float GROUP_GAP_MAX = 10.0f;   // Rearrange: most room put back between groups
 const float LEVEL_SHARE = 0.25f;     // Rearrange: groups level their wires only by this much of their size
+const float CAPTION_REACH = 2.0f;    // Rearrange: unwired text this close to a part goes with it...
+const float CAPTION_MAX_H = 2.0f;    // ...unless it is taller (a title)...
+const float CAPTION_MAX_W = 8.0f;    // ...or wider than this (a sentence)
 
 enum Align { LEFT, RIGHT, CENTER };
 
@@ -50,7 +57,14 @@ Align alignOf(const LayoutNode &n) {
 // is wired to. Works on its own copy of the nodes, all of them movable.
 class LeafLayout {
 public:
-	LeafLayout(std::vector<LayoutNode> nodes, float step) : N(std::move(nodes)), step(step), n(N.size()) {
+	// Caption room: how much of a node's box, on each side, is its captions
+	// rather than the part itself. The part reads, orders and lines up in
+	// its column as if they weren't there; they only take up room.
+	struct Margin { float l = 0.0f, r = 0.0f, b = 0.0f, t = 0.0f; };
+
+	LeafLayout(std::vector<LayoutNode> nodes, float step, std::vector<Margin> margins)
+		: N(std::move(nodes)), step(step), n(N.size()), margin(std::move(margins)) {
+		margin.resize(n);
 		for (size_t i = 0; i < n; i++)
 			for (size_t p = 0; p < N[i].pins.size(); p++)
 				if (N[i].pins[p].net >= 0) netPins[N[i].pins[p].net].push_back({ (int)i, (int)p });
@@ -79,8 +93,10 @@ private:
 	std::vector<LayoutNode> N;
 	float step;
 	size_t n;
+	std::vector<Margin> margin;
 	std::map<int, std::vector<std::pair<int, int>>> netPins;
 	std::vector<std::set<int>> succ, pred;
+	std::vector<char> fed;            // driven by something: an output, not a source
 	std::vector<int> layer;
 	int maxL = 0;
 	std::vector<std::vector<int>> layers;
@@ -102,8 +118,9 @@ private:
 	float snapUp(float v) const { return std::ceil(v / step - EPS) * step; }
 	float W(int i) const { return N[i].r - N[i].l; }
 	float H(int i) const { return N[i].t - N[i].b; }
-	float CX(int i) const { return (N[i].l + N[i].r) / 2.0f; }
-	float CY(int i) const { return (N[i].b + N[i].t) / 2.0f; }
+	float CX(int i) const { return (N[i].l + margin[i].l + N[i].r - margin[i].r) / 2.0f; }   // the part's own middle
+	float CY(int i) const { return (N[i].b + N[i].t) / 2.0f; }                               // the middle of its room
+	float bodyCY(int i) const { return (N[i].b + margin[i].b + N[i].t - margin[i].t) / 2.0f; }
 	bool isDummy(int v) const { return v >= (int)n; }
 	// A part wired on one side only: a label, a keypad, a display, a switch.
 	bool terminal(int v) const {
@@ -129,9 +146,13 @@ private:
 	}
 
 	// Signal flow: each driver points at what it drives; feedback loops are
-	// broken at the edge that points back, walking left to right.
+	// broken at the edge that points back, walking left to right. Parts are
+	// never turned, so the columns follow the way the pins face: a wire from
+	// a pin facing left to one facing right (a gate drawn turned round, its
+	// output on its left) runs right to left, and the part it feeds goes in
+	// an earlier column -- otherwise every such wire loops round both parts.
 	void flow() {
-		succ.assign(n, {}); pred.assign(n, {});
+		succ.assign(n, {}); pred.assign(n, {}); fed.assign(n, 0);
 		for (const auto &np : netPins) {
 			std::set<int> drivers, sinks;
 			for (const auto &pp : np.second) (N[pp.first].pins[pp.second].output ? drivers : sinks).insert(pp.first);
@@ -152,7 +173,23 @@ private:
 				for (int s : sinks) if (CX(s) < CX(left)) left = s;
 				drivers.insert(left); sinks.erase(left);
 			}
-			for (int u : drivers) for (int v : sinks) if (u != v) { succ[u].insert(v); pred[v].insert(u); }
+			// Which way each part's pins on this net face: +1 right, -1 left.
+			auto facing = [&](int v) {
+				int f = 0;
+				for (const auto &pp : np.second)
+					if (pp.first == v) { const int dx = N[v].pins[pp.second].dx; f += (dx > 0) - (dx < 0); }
+				return (f > 0) - (f < 0);
+			};
+			for (int u0 : drivers)
+				for (int v0 : sinks) {
+					if (u0 == v0) continue;
+					fed[v0] = 1;
+					int u = u0, v = v0;
+					// The driver's pin facing left and the sink's facing right
+					// (or one of them so, the other up or down): right to left.
+					if (facing(u) - facing(v) < 0) std::swap(u, v);
+					succ[u].insert(v); pred[v].insert(u);
+				}
 		}
 		std::vector<int> order(n);
 		for (size_t i = 0; i < n; i++) order[i] = (int)i;
@@ -175,7 +212,8 @@ private:
 	}
 
 	// Columns: the longest path from an input; outputs all in the last one;
-	// a source (a switch, ground) right before the first thing it feeds.
+	// a source (a switch, ground) right before the first thing it feeds, or
+	// right after it when it is drawn turned round, feeding leftward.
 	void layering() {
 		layer.assign(n, 0);
 		std::vector<int> indeg(n, 0), queue;
@@ -189,7 +227,7 @@ private:
 		}
 		maxL = 0;
 		for (size_t v = 0; v < n; v++) maxL = std::max(maxL, layer[v]);
-		for (size_t v = 0; v < n; v++) if (succ[v].empty() && !pred[v].empty()) layer[v] = maxL;
+		for (size_t v = 0; v < n; v++) if (succ[v].empty() && !pred[v].empty() && fed[v]) layer[v] = maxL;
 		for (size_t v = 0; v < n; v++) {
 			if (!pred[v].empty() || succ[v].empty()) continue;
 			int first = maxL;
@@ -225,7 +263,7 @@ private:
 				if (side == 0 && vert >= 2) across.push_back(v);
 			}
 			if (across.size() < 2) continue;
-			std::sort(across.begin(), across.end(), [&](int a, int b) { return N[a].l < N[b].l; });
+			std::sort(across.begin(), across.end(), [&](int a, int b) { return N[a].l + margin[a].l < N[b].l + margin[b].l; });
 			const int lead = across[0];
 			members[lead] = across;
 			for (size_t i = 1; i < across.size(); i++) {
@@ -274,7 +312,7 @@ private:
 		cy0.assign(n, 0.0f); y.assign(n, 0.0f); h.assign(n, 0.0f);
 		for (size_t v = 0; v < n; v++) { cy0[v] = CY((int)v); y[v] = cy0[v]; h[v] = H((int)v); }
 		for (size_t v = 0; v < n; v++) for (int m : members[v]) h[v] = std::max(h[v], H(m));
-		for (auto &lay : layers) std::sort(lay.begin(), lay.end(), [&](int a, int b) { return y[a] > y[b]; });
+		for (auto &lay : layers) std::sort(lay.begin(), lay.end(), [&](int a, int b) { return bodyCY(a) > bodyCY(b); });
 		auto faces = [](const LayoutPin &p) { return p.dx != 0 ? 0 : p.dy > 0 ? 1 : p.dy < 0 ? -1 : 0; };
 
 		// A wire that skips columns gets a placeholder in each column it
@@ -328,12 +366,12 @@ private:
 				std::vector<float> slots;
 				for (int v : terms) slots.push_back(key[v]);
 				std::sort(slots.begin(), slots.end(), [](float a, float b) { return a > b; });
-				std::sort(terms.begin(), terms.end(), [&](int a, int b) { return cy0[a] > cy0[b]; });
+				std::sort(terms.begin(), terms.end(), [&](int a, int b) { return bodyCY(a) > bodyCY(b); });
 				for (size_t i = 0; i < terms.size(); i++) key[terms[i]] = slots[i];
 			}
 			std::stable_sort(lay.begin(), lay.end(), [&](int a, int b) {
 				if (std::fabs(key[a] - key[b]) > EPS) return key[a] > key[b];
-				if (terminal(a) && terminal(b)) return cy0[a] > cy0[b];
+				if (terminal(a) && terminal(b)) return bodyCY(a) > bodyCY(b);
 				return y[a] > y[b];   // a tie keeps the current order
 			});
 			stack(lay);
@@ -374,9 +412,30 @@ private:
 		}
 
 		// Column x: each as wide as its widest gate, with a lane of room for
-		// every wire that has to cross the gap to the next.
+		// every wire that has to cross the gap to the next. Parts line up by
+		// their own bodies; the column widens on either side for captions
+		// that stick out past the others.
+		auto ml = [&](int v) { return members[v].size() == 1 ? margin[v].l : 0.0f; };
+		auto mr = [&](int v) { return members[v].size() == 1 ? margin[v].r : 0.0f; };
+		auto bodyW = [&](int v) { return stackW(v) - ml(v) - mr(v); };
+		std::vector<float> colB(maxL + 1, 0.0f), extL(maxL + 1, 0.0f), extR(maxL + 1, 0.0f);
+		for (size_t v = 0; v < n; v++) if (rep[v] == (int)v) colB[layer[v]] = std::max(colB[layer[v]], snapUp(bodyW((int)v)));
+		auto bodyOff = [&](int v) {
+			const float slack = colB[layer[v]] - bodyW(v);
+			switch (alignOf(N[v])) {
+			case LEFT:  return 0.0f;
+			case RIGHT: return slack;
+			default:    return slack / 2.0f;
+			}
+		};
+		for (size_t v = 0; v < n; v++) {
+			if (rep[v] != (int)v) continue;
+			const int l = layer[v];
+			extL[l] = std::max(extL[l], snapUp(ml((int)v) - bodyOff((int)v)));
+			extR[l] = std::max(extR[l], snapUp(bodyOff((int)v) + bodyW((int)v) + mr((int)v) - colB[l]));
+		}
 		std::vector<float> colW(maxL + 1, 0.0f), colX(maxL + 1, 0.0f), gap(maxL + 1, 0.0f);
-		for (size_t v = 0; v < n; v++) if (rep[v] == (int)v) colW[layer[v]] = std::max(colW[layer[v]], snapUp(stackW((int)v)));
+		for (int l = 0; l <= maxL; l++) colW[l] = extL[l] + colB[l] + extR[l];
 		for (const auto &np : netPins) {
 			int lo = maxL + 1, hi = -1;
 			for (const auto &pp : np.second) { lo = std::min(lo, layer[pp.first]); hi = std::max(hi, layer[pp.first]); }
@@ -387,13 +446,14 @@ private:
 		for (size_t v = 0; v < n; v++) {
 			if (rep[v] != (int)v) continue;
 			const int l = layer[v];
-			const float w = stackW((int)v);
+			const float base = colX[l] + extL[l], w = bodyW((int)v);
 			float left;
 			switch (alignOf(N[v])) {
-			case LEFT:   left = colX[l]; break;
-			case RIGHT:  left = colX[l] + colW[l] - w; break;
-			default:     left = snap(colX[l] + (colW[l] - w) / 2.0f); break;
+			case LEFT:   left = base; break;
+			case RIGHT:  left = base + colB[l] - w; break;
+			default:     left = snap(base + (colB[l] - w) / 2.0f); break;
 			}
+			left -= ml((int)v);
 			for (int m : members[v]) { newL[m] = left; left += W(m) + LAYER_GAP_Y; }
 		}
 
@@ -475,9 +535,11 @@ private:
 
 class Layouter {
 public:
-	explicit Layouter(const LayoutInput &in) : in(in), n(in.nodes.size()), ox(n, 0.0f), oy(n, 0.0f), movable(n, false) {
+	explicit Layouter(const LayoutInput &in) : in(in), n(in.nodes.size()), ox(n, 0.0f), oy(n, 0.0f), movable(n, false),
+	                                            el(n), eb(n), er(n), et(n) {
 		for (size_t i = 0; i < n; i++) {
 			movable[i] = in.nodes[i].movable;
+			el[i] = in.nodes[i].l; eb[i] = in.nodes[i].b; er[i] = in.nodes[i].r; et[i] = in.nodes[i].t;
 			for (size_t p = 0; p < in.nodes[i].pins.size(); p++)
 				if (in.nodes[i].pins[p].net >= 0) netPins[in.nodes[i].pins[p].net].push_back({ (int)i, (int)p });
 		}
@@ -498,6 +560,9 @@ private:
 	std::vector<float> ox, oy;
 	std::vector<char> movable;
 	std::map<int, std::vector<std::pair<int, int>>> netPins;   // net -> (node, pin)
+	// Each part's footprint before any move. The same as the node's own,
+	// except in Rearrange for a part with captions: theirs is added to it.
+	std::vector<float> el, eb, er, et;
 
 	// A drawing, not a circuit to lay out, stays exactly as drawn: parts drawn
 	// overlapping in a cluster of PICTURE_PARTS or more, or that many lights
@@ -520,10 +585,10 @@ private:
 
 	float snap(float v) const { return std::round(v / in.step) * in.step; }
 	float snapUp(float v) const { return std::ceil(v / in.step - EPS) * in.step; }
-	float L(int i) const { return in.nodes[i].l + ox[i]; }
-	float R(int i) const { return in.nodes[i].r + ox[i]; }
-	float B(int i) const { return in.nodes[i].b + oy[i]; }
-	float T(int i) const { return in.nodes[i].t + oy[i]; }
+	float L(int i) const { return el[i] + ox[i]; }
+	float R(int i) const { return er[i] + ox[i]; }
+	float B(int i) const { return eb[i] + oy[i]; }
+	float T(int i) const { return et[i] + oy[i]; }
 	float W(int i) const { return in.nodes[i].r - in.nodes[i].l; }
 	float H(int i) const { return in.nodes[i].t - in.nodes[i].b; }
 	float CX(int i) const { return (L(i) + R(i)) / 2.0f; }
@@ -575,6 +640,8 @@ private:
 				if (std::fabs(target - edge[k]) <= NUDGE + EPS) ox[col[k]] += snap(target - edge[k]);
 		}
 
+		orderLeaves(mv);
+
 		// Level each gate with what it's wired to, drivers first, so wires that
 		// miss by a step or three run straight.
 		std::vector<int> byX = mv;
@@ -584,8 +651,16 @@ private:
 			oy[j] += bestShift(j, std::set<int>(mine.begin(), mine.end()));
 		}
 
-		// No two gates overlap afterwards: push the lower one down.
-		for (int pass = 0; pass < 8; pass++) {
+		separate(mv);
+		if (seatLeaves(mv)) separate(mv);
+		// Again now nothing overlaps: parts pushed clear of each other land
+		// stacked in whatever order they were dropped.
+		orderLeaves(mv);
+	}
+
+	// No two gates overlap afterwards: push the lower one down.
+	void separate(const std::vector<int> &mv) {
+		for (int pass = 0; pass < 16; pass++) {
 			bool moved = false;
 			std::vector<int> byTop = mv;
 			std::sort(byTop.begin(), byTop.end(), [&](int a, int b) { return T(a) > T(b); });
@@ -595,12 +670,149 @@ private:
 					// Real overlaps only: parts drawn edge to edge (a stack of
 					// input labels) are meant to touch.
 					const bool hits = L(i) < R(j) - EPS && L(j) < R(i) - EPS && B(i) < T(j) - EPS && B(j) < T(i) - EPS;
-					if (hits) { oy[j] -= snapUp(T(j) - B(i)); moved = true; }
+					if (!hits) continue;
+					// Two parts wired straight to each other (a switch on top of its
+					// label, say): the one that is fed goes to the right of its driver,
+					// level, so the wire runs straight. Moving it down instead leaves
+					// the wire running backwards, and the router has to loop it round.
+					int src = -1, dst = -1;
+					float need = 0.0f;
+					if (backwardLink(i, j, src, dst, need) || backwardLink(j, i, src, dst, need)) { ox[dst] += snapUp(need); moved = true; continue; }
+					oy[j] -= snapUp(T(j) - B(i)); moved = true;
 				}
 			if (!moved) break;
 		}
 	}
 
+	// How many of a part's pins are wired; `pin` is the last of them.
+	int wires(int v, int &pin) const {
+		int count = 0;
+		for (size_t k = 0; k < in.nodes[v].pins.size(); k++)
+			if (in.nodes[v].pins[k].net >= 0) { count++; pin = (int)k; }
+		return count;
+	}
+
+	// Labels (or switches, lights) stacked in a column beside the part they
+	// are each wired to, in a different order from its pins: their wires have
+	// to cross in the gap between, where there's room for one to and not two,
+	// and the second is sent right round the column. They trade places -- the
+	// same spots, in the order of the pins.
+	void orderLeaves(const std::vector<int> &mv) {
+		struct Leaf { int v; float pinX, pinY; };   // its pin's x, the y of the pin it's wired to
+		std::map<std::pair<int, int>, std::vector<Leaf>> sides;   // (part, side of it) -> leaves there
+		for (int v : mv) {
+			int pi = -1;
+			if (wires(v, pi) != 1) continue;
+			const LayoutPin &p = in.nodes[v].pins[pi];
+			if (p.dx == 0) continue;
+			const auto &np = netPins[p.net];
+			if (np.size() != 2) continue;
+			const std::pair<int, int> &o = np[0].first == v ? np[1] : np[0];
+			if (o.first == v) continue;
+			const LayoutPin &q = in.nodes[o.first].pins[o.second];
+			if (q.dx != -p.dx || ((q.x + ox[o.first]) - (p.x + ox[v])) * p.dx <= EPS) continue;
+			sides[{ o.first, q.dx }].push_back({ v, p.x + ox[v], q.y + oy[o.first] });
+		}
+		for (auto &sd : sides) {
+			std::vector<Leaf> &all = sd.second;
+			std::sort(all.begin(), all.end(), [&](const Leaf &a, const Leaf &b) { return T(a.v) > T(b.v); });
+			for (size_t i = 0; i < all.size();) {
+				// A run: same size, pins in one column, one right under the next.
+				size_t j = i;
+				while (j + 1 < all.size()) {
+					const int a = all[j].v, b = all[j + 1].v;
+					const float gap = B(a) - T(b);
+					if (std::fabs(W(a) - W(b)) > EPS || std::fabs(H(a) - H(b)) > EPS || std::fabs(all[j].pinX - all[j + 1].pinX) > EPS ||
+					    gap < -EPS || gap > STACK_GAP + EPS) break;
+					j++;
+				}
+				if (j > i) {
+					std::vector<Leaf> want(all.begin() + i, all.begin() + j + 1);
+					std::stable_sort(want.begin(), want.end(), [](const Leaf &a, const Leaf &b) { return a.pinY > b.pinY + EPS; });
+					std::vector<std::pair<float, float>> spot;
+					for (size_t k = i; k <= j; k++) spot.push_back({ L(all[k].v), B(all[k].v) });
+					for (size_t k = 0; k < want.size(); k++) {
+						const int v = want[k].v;
+						const float dx = spot[k].first - L(v), dy = spot[k].second - B(v);
+						ox[v] += dx; oy[v] += dy;
+					}
+				}
+				i = j + 1;
+			}
+		}
+	}
+
+	// A part with one wire (a label, a switch, a light) left on the wrong side
+	// of the pin it's wired to -- its wire would have to leave it, turn back
+	// and loop round to come in from the front. It goes to the nearest free
+	// spot in front of that pin instead, level with it when there's room.
+	bool seatLeaves(const std::vector<int> &mv) {
+		bool any = false;
+		for (int v : mv) {
+			int pi = -1;
+			if (wires(v, pi) != 1) continue;
+			const LayoutPin &p = in.nodes[v].pins[pi];
+			if (p.dx == 0) continue;
+			const float px = p.x + ox[v], py = p.y + oy[v];
+			// The pins facing this one on its wire: fine if any is ahead of it.
+			int best = -1, bestPin = -1;
+			float bestD = FLT_MAX, bestGap = 0.0f;
+			bool ahead = false;
+			for (const auto &qq : netPins[p.net]) {
+				if (qq.first == v) continue;
+				const LayoutPin &q = in.nodes[qq.first].pins[qq.second];
+				if (q.dx != -p.dx) continue;
+				const float qx = q.x + ox[qq.first], qy = q.y + oy[qq.first];
+				const float gap = (qx - px) * p.dx;
+				// Ahead with room for the wire to turn, or touching and level.
+				if (gap >= 2 * in.step - EPS || (gap > -EPS && std::fabs(qy - py) < EPS)) { ahead = true; break; }
+				const float d = std::fabs(qx - px) + std::fabs(qy - py);
+				if (d < bestD) { bestD = d; best = qq.first; bestPin = qq.second; bestGap = gap; }
+			}
+			if (ahead || best < 0 || bestD > SEAT_REACH) continue;
+			// Two such parts wired to each other: the one that is fed moves.
+			int other = -1;
+			if (p.output && movable[best] && wires(best, other) == 1) continue;
+			const LayoutPin &q = in.nodes[best].pins[bestPin];
+			const float sx = -p.dx * snapUp(LEAD - bestGap);
+			const float sy = snap((q.y + oy[best]) - py);
+			bool placed = false;
+			for (int cost = 0; cost <= SEAT_ROWS + 2 * SEAT_COLS && !placed; cost++)
+				for (int col = 0; col <= SEAT_COLS && 2 * col <= cost && !placed; col++) {
+					const int row = cost - 2 * col;
+					if (row > SEAT_ROWS) continue;
+					for (int sgn = 1; sgn >= (row == 0 ? 1 : -1) && !placed; sgn -= 2) {
+						const float dx = sx - p.dx * col * in.step, dy = sy + sgn * row * in.step;
+						const float l = L(v) + dx, r = R(v) + dx, b = B(v) + dy, t = T(v) + dy;
+						bool free = true;
+						for (size_t j = 0; j < n && free; j++) {
+							if ((int)j == v) continue;
+							if (l < R((int)j) - EPS && L((int)j) < r - EPS && b < T((int)j) - EPS && B((int)j) < t - EPS) free = false;
+						}
+						if (!free) continue;
+						ox[v] += dx; oy[v] += dy;
+						placed = any = true;
+					}
+				}
+		}
+		return any;
+	}
+
+
+	// True when `a` drives a pin of `b` that sits left of (or too close to the
+	// right of) the driving pin: `need` is how far `b` has to go right for the
+	// wire to have LEAD between the two pins.
+	bool backwardLink(int a, int b, int &src, int &dst, float &need) const {
+		for (const LayoutPin &pa : in.nodes[a].pins) {
+			if (!pa.output || pa.dx <= 0 || pa.net < 0) continue;
+			for (const LayoutPin &pb : in.nodes[b].pins) {
+				if (pb.output || pb.dx >= 0 || pb.net != pa.net) continue;
+				const float gap = (pb.x + ox[b]) - (pa.x + ox[a]);
+				if (gap < LEAD - EPS) { src = a; dst = b; need = LEAD - gap; return true; }
+			}
+		}
+		return false;
+	}
 
 	// The move (within ALIGN_REACH, in grid steps) that lines up the most of
 	// this gate's pins with the pins they're wired to across the way; 0 unless
@@ -665,6 +877,20 @@ private:
 		}
 		if (C.size() < 2) return;
 
+		// Captions go with the part they were drawn beside, and that part
+		// keeps room for them: whole grid steps, so parts placed on the grid
+		// edge to edge still clear each other's captions.
+		std::vector<int> anchor = attachCaptions(inC);
+		for (size_t c = 0; c < n; c++) {
+			const int a = anchor[c];
+			if (a < 0) continue;
+			const LayoutNode &an = in.nodes[a], &cn = in.nodes[c];
+			el[a] = std::min(el[a], an.l - snapUp(std::max(0.0f, an.l - cn.l)));
+			eb[a] = std::min(eb[a], an.b - snapUp(std::max(0.0f, an.b - cn.b)));
+			er[a] = std::max(er[a], an.r + snapUp(std::max(0.0f, cn.r - an.r)));
+			et[a] = std::max(et[a], an.t + snapUp(std::max(0.0f, cn.t - an.t)));
+		}
+
 		// Separate circuits (nothing wired between them) are laid out one at a
 		// time, each where it was.
 		std::vector<int> parent(n);
@@ -708,7 +934,7 @@ private:
 			return bk;
 		};
 		for (auto &cp : comps) blocks.push_back(blockOf(cp.second));
-		for (size_t i = 0; i < n; i++) if (movable[i] && !inC[i]) blocks.push_back(blockOf({ (int)i }));
+		for (size_t i = 0; i < n; i++) if (movable[i] && !inC[i] && anchor[i] < 0) blocks.push_back(blockOf({ (int)i }));
 		std::sort(blocks.begin(), blocks.end(), [](const Block &a, const Block &b) { return a.top0 > b.top0; });
 		for (size_t k = 1; k < blocks.size(); k++) {
 			// Each move clears at least one block for good (moves only go right
@@ -730,6 +956,40 @@ private:
 				blocks[k].l += dx; blocks[k].r += dx; blocks[k].b -= dy; blocks[k].t -= dy;
 			}
 		}
+		for (size_t c = 0; c < n; c++)
+			if (anchor[c] >= 0) { ox[c] = ox[anchor[c]]; oy[c] = oy[anchor[c]]; }
+	}
+
+	// Rearrange: for each part, the part it is a caption of, or -1. A caption
+	// is a movable part with no wires (text, mostly) drawn within
+	// CAPTION_REACH of a wired part; it belongs to the nearest wired part,
+	// edge to edge, when that part is one being laid out. One drawn by a part
+	// that stays (or by nothing) is left alone, as are big ones (a title).
+	std::vector<int> attachCaptions(const std::vector<char> &inC) const {
+		std::vector<int> anchor(n, -1);
+		std::vector<char> wired(n, 0);
+		for (const auto &np : netPins) {
+			bool two = false;
+			for (const auto &pp : np.second) if (pp.first != np.second[0].first) two = true;
+			if (two) for (const auto &pp : np.second) wired[pp.first] = 1;
+		}
+		for (size_t c = 0; c < n; c++) {
+			if (!movable[c] || inC[c] || wired[c]) continue;
+			const LayoutNode &cn = in.nodes[c];
+			if (cn.t - cn.b > CAPTION_MAX_H + EPS || cn.r - cn.l > CAPTION_MAX_W + EPS) continue;
+			int best = -1;
+			float bestD = FLT_MAX;
+			for (size_t j = 0; j < n; j++) {
+				if (!wired[j]) continue;
+				const LayoutNode &a = in.nodes[j];
+				const float gx = std::max(0.0f, std::max(a.l - cn.r, cn.l - a.r));
+				const float gy = std::max(0.0f, std::max(a.b - cn.t, cn.b - a.t));
+				const float d = std::sqrt(gx * gx + gy * gy);
+				if (d < bestD - EPS) { bestD = d; best = (int)j; }
+			}
+			if (best >= 0 && bestD <= CAPTION_REACH + EPS && inC[best]) anchor[c] = best;
+		}
+		return anchor;
 	}
 
 	struct Box { float l, b, r, t; };
@@ -831,11 +1091,12 @@ private:
 	// Splits S at the gaps the user left along one axis: a gap of GROUP_GAP
 	// or more that every gate clears, with at least two gates on each side
 	// and few wires across it next to the wiring within each side. Pieces
-	// come back in order along the axis; one piece means no split.
+	// come back in order along the axis; one piece means no split. The gaps
+	// are between the parts themselves: a caption in one doesn't close it.
 	std::vector<std::vector<int>> splitAlong(const std::vector<int> &S, bool alongX) const {
 		std::vector<int> order = S;
-		auto lo = [&](int v) { return alongX ? L(v) : -T(v); };
-		auto hi = [&](int v) { return alongX ? R(v) : -B(v); };
+		auto lo = [&](int v) { return alongX ? in.nodes[v].l + ox[v] : -(in.nodes[v].t + oy[v]); };
+		auto hi = [&](int v) { return alongX ? in.nodes[v].r + ox[v] : -(in.nodes[v].b + oy[v]); };
 		std::sort(order.begin(), order.end(), [&](int a, int b) { return lo(a) < lo(b); });
 		std::vector<std::vector<int>> pieces;
 		std::vector<int> cur;
@@ -877,9 +1138,15 @@ private:
 		}
 		const bool down = v > h;
 		std::vector<LayoutNode> local;
+		std::vector<LeafLayout::Margin> margins;   // caption room round each part, in the group's own frame
 		for (int w : S) {
 			LayoutNode nd = in.nodes[w];
 			nd.l = L(w); nd.r = R(w); nd.b = B(w); nd.t = T(w);
+			const LayoutNode &body = in.nodes[w];
+			LeafLayout::Margin m;
+			if (down) { m.l = et[w] - body.t; m.r = body.b - eb[w]; m.b = body.l - el[w]; m.t = er[w] - body.r; }   // x' = -y, y' = x
+			else { m.l = body.l - el[w]; m.r = er[w] - body.r; m.b = body.b - eb[w]; m.t = et[w] - body.t; }
+			margins.push_back(m);
 			for (LayoutPin &p : nd.pins) {
 				p.x += ox[w]; p.y += oy[w];
 				// Wires out of the group don't shape it.
@@ -901,7 +1168,7 @@ private:
 			}
 			local.push_back(nd);
 		}
-		LeafLayout leaf(std::move(local), in.step);
+		LeafLayout leaf(std::move(local), in.step, std::move(margins));
 		const std::vector<std::pair<float, float>> off = leaf.run();
 		for (size_t i = 0; i < S.size(); i++) {
 			if (down) { ox[S[i]] += off[i].second; oy[S[i]] -= off[i].first; }
