@@ -382,3 +382,77 @@ TEST_CASE("layout keep: labels already in the order of the pins stay where they 
 	auto off = layoutGates(in);
 	for (auto &o : off) { CHECK(o.first == doctest::Approx(0.0f)); CHECK(o.second == doctest::Approx(0.0f)); }
 }
+
+namespace {
+LayoutPin upPin(float x, float y, int dy, int net, bool out) {
+	LayoutPin p; p.x = x; p.y = y; p.dy = dy; p.net = net; p.output = out; return p;
+}
+}  // namespace
+
+TEST_CASE("layout keep: tie points drawn in a row stay in their row") {
+	LayoutInput in;
+	// three tie points side by side, and a caption just under them whose
+	// middle lines up with the last: lining the "stack" up used to put the
+	// middle one on top of the last
+	LayoutNode a = box(63.7f, -53, 0.6f, 2); a.pins = { upPin(64, -51, 1, 0, false) };
+	LayoutNode b = box(64.7f, -53, 0.6f, 2); b.pins = { upPin(65, -51, 1, 1, false) };
+	LayoutNode c = box(65.7f, -53, 0.6f, 2); c.pins = { upPin(66, -51, 1, 2, false) };
+	LayoutNode cap = box(64.2f, -54.6f, 3.6f, 1.2f);
+	in.nodes = { a, b, c, cap };
+	auto off = layoutGates(in);
+	for (size_t i = 0; i < 3; i++) {
+		CHECK(off[i].second == doctest::Approx(0.0f));
+		for (size_t j = i + 1; j < 4; j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
+	}
+}
+
+TEST_CASE("layout keep: a part drawn turned round, dropped on what feeds it, goes back beside it, level") {
+	LayoutInput in;
+	// a decoder with outputs on its left, and an OR drawn turned round (inputs
+	// on its right) dropped over its lower corner, 6 below level
+	LayoutNode dec = box(75, -49, 6, 9);
+	dec.pins = { pin(75, -43, -1, 0, true), pin(75, -45, -1, 1, true), pin(75, -47, -1, 2, true), pin(75, -49, -1, 3, true) };
+	LayoutNode orr = box(72.5f, -56, 7, 8);
+	orr.pins = { pin(79.5f, -49, 1, 0, false), pin(79.5f, -51, 1, 1, false), pin(79.5f, -53, 1, 2, false), pin(79.5f, -55, 1, 3, false),
+	             pin(72.5f, -52, -1, 4, true) };
+	in.nodes = { dec, orr };
+	auto off = layoutGates(in);
+	CHECK_FALSE(overlap(in.nodes[0], off[0], in.nodes[1], off[1]));
+	// left of the decoder with room for the wires, each input level with its driver
+	CHECK(79.5f + off[1].first <= 75.0f + off[0].first - 2.0f + 1e-3f);
+	CHECK(-49.0f + off[1].second == doctest::Approx(-43.0f + off[0].second));
+}
+
+TEST_CASE("layout keep: a keypad dropped onto an adder's inputs moves off them; the adder stays") {
+	LayoutInput in;
+	LayoutNode add = box(88, 2, 16, 8);
+	for (int k = 0; k < 4; k++) add.pins.push_back(upPin(94.0f - k, 10, 1, k, false));
+	for (int k = 0; k < 4; k++) add.pins.push_back(upPin(101.0f - k, 10, 1, 4 + k, false));
+	LayoutNode k1 = box(80, 23, 9, 12), k2 = box(86, 5, 9, 12);
+	for (int k = 0; k < 4; k++) k1.pins.push_back(pin(89, 26.0f + 2 * k, 1, k, true));
+	for (int k = 0; k < 4; k++) k2.pins.push_back(pin(95, 8.0f + 2 * k, 1, 4 + k, true));
+	in.nodes = { add, k1, k2 };
+	auto off = layoutGates(in);
+	CHECK(off[0].first == doctest::Approx(0.0f));
+	CHECK(off[0].second == doctest::Approx(0.0f));
+	for (size_t i = 0; i < 3; i++)
+		for (size_t j = i + 1; j < 3; j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
+	// no adder input left under the keypad without room for its wire
+	const float l = 86 + off[2].first, r = 95 + off[2].first, b = 5 + off[2].second;
+	for (const LayoutPin &p : add.pins) CHECK((p.x < l - 1.5f || p.x > r + 1.5f || b >= p.y + 3.0f - 1e-3f));
+}
+
+TEST_CASE("layout keep: a gate dropped onto the next part's inputs keeps its place and gets a channel") {
+	LayoutInput in;
+	LayoutNode gate = box(6, -11, 6, 4);
+	gate.pins = { pin(6, -8, -1, 0, false), pin(6, -10, -1, 1, false), pin(12, -9, 1, 2, true) };
+	LayoutNode add = box(-1, -18, 16, 8);
+	for (int k = 0; k < 4; k++) add.pins.push_back(upPin(7.0f + k, -10, 1, 3 + k, false));
+	in.nodes = { gate, add };
+	auto off = layoutGates(in);
+	CHECK(off[0].first == doctest::Approx(0.0f));
+	CHECK(off[0].second == doctest::Approx(0.0f));
+	CHECK(off[1].first == doctest::Approx(0.0f));
+	// room under the gate for the four wires to reach their pins
+	CHECK(-11.0f - (-10.0f + off[1].second) >= 1.0f + 4 * 0.5f - 1e-3f);
+}

@@ -22,6 +22,10 @@ const float LEAD = 2.0f;             // Keep Layout: room between a driver's pin
 const float SEAT_REACH = 8.0f;       // Keep Layout: a stray label or switch is put beside the pin it's wired to only from this close
 const int SEAT_ROWS = 8;             // ...and at most this many steps off level, or
 const int SEAT_COLS = 6;             // this many further out, when the level spot is taken
+const float PIN_CLEAR = 1.0f;        // Keep Layout: room a wire needs in front of its pin
+const float PIN_MARGIN = 1.5f;       // ...beside a part's edge, too
+const float RESETTLE_REACH = 12.0f;  // Keep Layout: furthest a part dropped onto another's pins moves to clear them...
+const float RESETTLE_CLEAR = 3.0f;   // ...and the room it leaves in front of every pin there
 const float BLOCK_GAP = 1.5f;        // Rearrange: room kept between separate circuits
 const float PIN_OFFSET = 1.5f;        // Rearrange: how far an up/down pin sits off its wire
 const int PICTURE_PARTS = 4;         // this many overlapping parts are a drawing
@@ -563,6 +567,7 @@ private:
 	// Each part's footprint before any move. The same as the node's own,
 	// except in Rearrange for a part with captions: theirs is added to it.
 	std::vector<float> el, eb, er, et;
+	std::set<std::pair<int, int>> drawnOver;   // Keep Layout: pairs that overlapped as drawn
 
 	// A drawing, not a circuit to lay out, stays exactly as drawn: parts drawn
 	// overlapping in a cluster of PICTURE_PARTS or more, or that many lights
@@ -636,8 +641,13 @@ private:
 			std::vector<float> sorted = edge;
 			std::sort(sorted.begin(), sorted.end());
 			const float target = sorted[sorted.size() / 2];
+			// A part that would land on a neighbor stays: parts drawn side by side
+			// in a row (tie points) chain into a stack through what's under them.
 			for (size_t k = 0; k < col.size(); k++)
-				if (std::fabs(target - edge[k]) <= NUDGE + EPS) ox[col[k]] += snap(target - edge[k]);
+				if (std::fabs(target - edge[k]) <= NUDGE + EPS) {
+					const float s = snap(target - edge[k]);
+					if (!newHit(col[k], s, 0.0f)) ox[col[k]] += s;
+				}
 		}
 
 		orderLeaves(mv);
@@ -651,6 +661,11 @@ private:
 			oy[j] += bestShift(j, std::set<int>(mine.begin(), mine.end()));
 		}
 
+		// Parts drawn on top of each other, before any are pushed apart.
+		for (int i : mv)
+			for (size_t k = 0; k < n; k++)
+				if ((int)k != i && L(i) < R((int)k) - EPS && L((int)k) < R(i) - EPS && B(i) < T((int)k) - EPS && B((int)k) < T(i) - EPS)
+					drawnOver.insert({ std::min(i, (int)k), std::max(i, (int)k) });
 		separate(mv);
 		if (seatLeaves(mv)) separate(mv);
 		// Again now nothing overlaps: parts pushed clear of each other land
@@ -677,8 +692,33 @@ private:
 					// the wire running backwards, and the router has to loop it round.
 					int src = -1, dst = -1;
 					float need = 0.0f;
-					if (backwardLink(i, j, src, dst, need) || backwardLink(j, i, src, dst, need)) { ox[dst] += snapUp(need); moved = true; continue; }
-					oy[j] -= snapUp(T(j) - B(i)); moved = true;
+					if (backwardLink(i, j, src, dst, need) || backwardLink(j, i, src, dst, need)) {
+						const float dx = need > 0 ? snapUp(need) : -snapUp(-need);
+						// Level, too, if that lands it on nothing new: a gate fed
+						// several wires by a part it was dropped on goes back beside it.
+						const float dy = levelWith(src, dst);
+						ox[dst] += dx;
+						if (dy != 0.0f && !newHit(dst, 0.0f, dy)) oy[dst] += dy;
+						moved = true; continue;
+					}
+					// Two parts drawn on top of each other where, pushed down, j would
+					// sit tight under i with several pins of one facing the other and
+					// no room for their wires (a keypad dropped onto the adder it
+					// feeds). The smaller goes to the nearest spot where it covers no
+					// one's pins, if it only feeds or is only fed (a keypad, a
+					// display); one in a chain stays in its column, and the gap gets
+					// a lane for each of those wires instead. (Parts with one wire
+					// are seated in front of their pin later.)
+					float drop = snapUp(T(j) - B(i));
+					int pin = -1;
+					const bool drawn = drawnOver.count({ std::min(i, j), std::max(i, j) }) > 0;
+					const int blocked = drawn && wires(i, pin) >= 2 && wires(j, pin) >= 2 ? facingPins(i, j, -drop) : 0;
+					if (blocked >= 2) {
+						const int s = W(i) * H(i) <= W(j) * H(j) ? i : j;
+						if (oneWay(s)) { if (resettle(s)) { moved = true; continue; } }
+						else drop = snapUp(T(j) - B(i) + PIN_CLEAR + blocked * in.step);
+					}
+					oy[j] -= drop; moved = true;
 				}
 			if (!moved) break;
 		}
@@ -801,16 +841,105 @@ private:
 
 	// True when `a` drives a pin of `b` that sits left of (or too close to the
 	// right of) the driving pin: `need` is how far `b` has to go right for the
-	// wire to have LEAD between the two pins.
+	// wire to have LEAD between the two pins. Parts drawn turned round
+	// (outputs on the left) the same way, leftwards: `need` is then negative.
 	bool backwardLink(int a, int b, int &src, int &dst, float &need) const {
 		for (const LayoutPin &pa : in.nodes[a].pins) {
-			if (!pa.output || pa.dx <= 0 || pa.net < 0) continue;
+			if (!pa.output || pa.dx == 0 || pa.net < 0) continue;
 			for (const LayoutPin &pb : in.nodes[b].pins) {
-				if (pb.output || pb.dx >= 0 || pb.net != pa.net) continue;
-				const float gap = (pb.x + ox[b]) - (pa.x + ox[a]);
-				if (gap < LEAD - EPS) { src = a; dst = b; need = LEAD - gap; return true; }
+				if (pb.output || pb.dx != -pa.dx || pb.net != pa.net) continue;
+				const float gap = ((pb.x + ox[b]) - (pa.x + ox[a])) * pa.dx;
+				if (gap < LEAD - EPS) { src = a; dst = b; need = (LEAD - gap) * pa.dx; return true; }
 			}
 		}
+		return false;
+	}
+
+	// The move up or down that lines `dst`'s inputs up with the pins of `src`
+	// driving them (the middle one of their offsets) when it takes two wires or
+	// more from it.
+	float levelWith(int src, int dst) const {
+		std::vector<float> d;
+		for (const LayoutPin &pa : in.nodes[src].pins) {
+			if (!pa.output || pa.dx == 0 || pa.net < 0) continue;
+			for (const LayoutPin &pb : in.nodes[dst].pins)
+				if (!pb.output && pb.dx == -pa.dx && pb.net == pa.net) d.push_back((pa.y + oy[src]) - (pb.y + oy[dst]));
+		}
+		// One wire (a label beside its pin) only goes sideways: it stays in its
+		// column of labels.
+		if (d.size() < 2) return 0.0f;
+		std::sort(d.begin(), d.end());
+		return snap(d[d.size() / 2]);
+	}
+
+	// Would `v` moved by (dx, dy) overlap a part it doesn't overlap now?
+	bool newHit(int v, float dx, float dy) const {
+		for (size_t k = 0; k < n; k++) {
+			if ((int)k == v) continue;
+			const int j = (int)k;
+			const bool now = L(v) < R(j) - EPS && L(j) < R(v) - EPS && B(v) < T(j) - EPS && B(j) < T(v) - EPS;
+			const bool then = L(v) + dx < R(j) - EPS && L(j) < R(v) + dx - EPS && B(v) + dy < T(j) - EPS && B(j) < T(v) + dy - EPS;
+			if (then && !now) return true;
+		}
+		return false;
+	}
+
+	// A wired pin of `p` (moved by pdx, pdy) facing straight into box
+	// l..r, b..t from closer than PIN_CLEAR: no room for its wire.
+	int pinFaces(int p, float pdx, float pdy, float l, float b, float r, float t, float clear = PIN_CLEAR) const {
+		int count = 0;
+		for (const LayoutPin &q : in.nodes[p].pins) {
+			if (q.net < 0) continue;
+			const float x = q.x + ox[p] + pdx, y = q.y + oy[p] + pdy;
+			if (q.dy != 0) {
+				if (x <= l - PIN_MARGIN || x >= r + PIN_MARGIN) continue;
+				const float d = q.dy > 0 ? b - y : y - t;
+				if (d > -EPS && d < clear - EPS) count++;
+			} else if (q.dx != 0) {
+				if (y <= b - PIN_MARGIN || y >= t + PIN_MARGIN) continue;
+				const float d = q.dx > 0 ? l - x : x - r;
+				if (d > -EPS && d < clear - EPS) count++;
+			}
+		}
+		return count;
+	}
+
+	// All of a part's wired pins drive, or all are driven.
+	bool oneWay(int v) const {
+		bool o = false, i = false;
+		for (const LayoutPin &q : in.nodes[v].pins) if (q.net >= 0) (q.output ? o : i) = true;
+		return !(o && i);
+	}
+
+	// With j moved down by `dy`, how many pins of i and j face the other part?
+	int facingPins(int i, int j, float dy) const {
+		return pinFaces(j, 0.0f, dy, L(i), B(i), R(i), T(i)) + pinFaces(i, 0.0f, 0.0f, L(j), B(j) + dy, R(j), T(j) + dy);
+	}
+
+	// The nearest spot (within RESETTLE_REACH) where `v` overlaps nothing, no
+	// pin of its faces a part, and it covers no part's pin; false if none.
+	bool resettle(int v) {
+		const int reach = (int)std::lround(RESETTLE_REACH / in.step);
+		for (int cost = 1; cost <= 2 * reach; cost++)
+			for (int ax = 0; ax <= cost && ax <= reach; ax++) {
+				const int ay = cost - ax;
+				if (ay > reach) continue;
+				for (int sx = 1; sx >= (ax == 0 ? 1 : -1); sx -= 2)
+					for (int sy = 1; sy >= (ay == 0 ? 1 : -1); sy -= 2) {
+						const float dx = sx * ax * in.step, dy = sy * ay * in.step;
+						const float l = L(v) + dx, r = R(v) + dx, b = B(v) + dy, t = T(v) + dy;
+						bool ok = true;
+						for (size_t k = 0; k < n && ok; k++) {
+							const int j = (int)k;
+							if (j == v) continue;
+							if (l < R(j) - EPS && L(j) < r - EPS && b < T(j) - EPS && B(j) < t - EPS) ok = false;
+							else if (pinFaces(j, 0.0f, 0.0f, l, b, r, t, RESETTLE_CLEAR) || pinFaces(v, dx, dy, L(j), B(j), R(j), T(j), RESETTLE_CLEAR)) ok = false;
+						}
+						if (!ok) continue;
+						ox[v] += dx; oy[v] += dy;
+						return true;
+					}
+			}
 		return false;
 	}
 
