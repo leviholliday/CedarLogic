@@ -18,6 +18,11 @@
 //     early nets move aside for later ones instead of the order deciding. On
 //     a big page, where a full pass is costly, later passes reroute only the
 //     nets still sharing a line, and stop once that stops helping;
+//   * finished wires are then polished: each straight run of a tree is tried
+//     slid sideways to the lines where that ends a jog or a crossing, and kept
+//     there when the wire comes out shorter, with fewer bends or less crowded
+//     -- never with a crossing more (staircases become one bend, a branch
+//     comes off where it is needed);
 //   * the work is capped in search steps, not seconds (Tidy Up runs on the UI
 //     thread, and the result mustn't depend on the machine): a wire past the
 //     cap is left to the caller's plain route;

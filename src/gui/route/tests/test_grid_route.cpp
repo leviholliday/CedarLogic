@@ -260,3 +260,49 @@ TEST_CASE("grid: a pin pointing into the gate stacked on it runs straight throug
 		CHECK(sg.bx == doctest::Approx(2.0f));
 	}
 }
+
+namespace {
+// Bends: a horizontal and a vertical segment of one route meeting end to end.
+int corners(const RouteResult &r) {
+	int n = 0;
+	for (const Segment &h : r.segments) for (const Segment &v : r.segments) {
+		if (h.vertical || !v.vertical) continue;
+		const bool atX = std::fabs(v.bx - h.bx) < E || std::fabs(v.bx - h.ex) < E;
+		const bool atY = std::fabs(h.by - v.by) < E || std::fabs(h.by - v.ey) < E;
+		if (atX && atY) n++;
+	}
+	return n;
+}
+}  // namespace
+
+// The search steers each jog toward the middle of its connection, so a wire
+// that has to rise past a part used to climb in two steps: up, across to the
+// middle, up again. Polish slides the runs until the two jogs line up.
+TEST_CASE("grid: a wire climbing past a part makes one jog, not a staircase") {
+	GridInput in;
+	in.obstacles = { { 7, -5, 9, -2 }, { 15, 5, 17, 8 } };
+	GridNet n;
+	n.pins = { pin(0, -5, 1, 0), pin(20, 3.5f, -1, 0) };
+	in.nets = { n };
+	GridOutput out = routeGrid(in);
+	REQUIRE(out.ok[0]);
+	CHECK(validTree(out.routes[0], 2));
+	for (const GridRect &g : in.obstacles) CHECK_FALSE(entersRect(out.routes[0], g));
+	CHECK(corners(out.routes[0]) == 2);
+}
+
+// A wire to two pins stacked on the far side: grown one pin at a time, the
+// branch to the second pin came off a jog near the start and ran back along
+// the first. Polish moves the junction to where the two pins are.
+TEST_CASE("grid: a branch to a stacked pin comes off near that pin") {
+	GridInput in;
+	in.obstacles = { { 10, -4, 12, -1 }, { 7, -2, 9, 1 }, { 10, -6, 12, -3 } };
+	GridNet n;
+	n.pins = { pin(0, 1.5f, 1, 0), pin(20, 4, -1, 0), pin(20, 5.5f, -1, 0) };
+	in.nets = { n };
+	GridOutput out = routeGrid(in);
+	REQUIRE(out.ok[0]);
+	CHECK(validTree(out.routes[0], 3));
+	for (const GridRect &g : in.obstacles) CHECK_FALSE(entersRect(out.routes[0], g));
+	CHECK(corners(out.routes[0]) <= 2);
+}
