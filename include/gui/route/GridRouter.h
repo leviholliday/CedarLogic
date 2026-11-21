@@ -18,6 +18,11 @@
 //     early nets move aside for later ones instead of the order deciding. On
 //     a big page, where a full pass is costly, later passes reroute only the
 //     nets still sharing a line, and stop once that stops helping;
+//   * a net that still comes out much longer than the shortest tree joining
+//     its pins (walled in by nets routed before it, it went round a block) is
+//     routed again first, crossings cheap, the nets in its way put back round
+//     it, and kept when the lot come out shorter, counting a crossing as a
+//     few units of wire;
 //   * finished wires are then polished: each straight run of a tree is tried
 //     slid sideways to the lines where that ends a jog or a crossing, and kept
 //     there when the wire comes out shorter, with fewer bends or less crowded

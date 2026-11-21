@@ -7,6 +7,8 @@
 #include <cmath>
 #include <functional>
 #include <map>
+#include <sstream>
+#include <string>
 
 using namespace cl::route;
 
@@ -305,4 +307,164 @@ TEST_CASE("grid: a branch to a stacked pin comes off near that pin") {
 	CHECK(validTree(out.routes[0], 3));
 	for (const GridRect &g : in.obstacles) CHECK_FALSE(entersRect(out.routes[0], g));
 	CHECK(corners(out.routes[0]) <= 2);
+}
+
+namespace {
+float routeLength(const RouteResult &r) {
+	float len = 0.0f;
+	for (const Segment &s : r.segments) len += std::fabs(s.ex - s.bx) + std::fabs(s.ey - s.by);
+	return len;
+}
+// A bus of `count` horizontal wires from x = -half to x = half, two units apart
+// and centred on y = 0, routed first; then a wire from straight above the bus
+// to straight below it.
+GridInput busAndCrossingWire(int count, float half) {
+	GridInput in;
+	for (int i = 0; i < count; i++) {
+		const float y = (i - (count - 1) / 2.0f) * 2.0f;
+		GridNet b; b.pins = { pin(-half, y, 1, 0), pin(half, y, -1, 0) };
+		in.nets.push_back(b);
+	}
+	GridNet w; w.pins = { pin(0, count + 4.0f, 0, -1), pin(0, -count - 4.0f, 0, 1) };
+	in.nets.push_back(w);
+	return in;
+}
+
+// "One bit cell" from lab6.cdl, page 2, as Straighten hands it over: tie
+// points above and below the cell, buses across it. The six-pin wire joining
+// the top tie points to the bottom ones (and the mux, the flip-flop, N.n) was
+// routed last, every lane down the column already taken, and went right
+// round the cell -- 110 units of wire where the person drew 78, straight down
+// the middle crossing a few wires.
+const char *BIT_CELL =
+	"N 0 65 -16.5 -1 0 65 -18.5 0 1\n"
+	"N 0 69 -17 -1 0 66 -18.5 0 1\n"
+	"N 0 87 -36 -1 0 85.5 -36 1 0\n"
+	"N 0 87.5 -38 -1 0 85.5 -37 1 0\n"
+	"N 0 71 -23.5 0 1 62.5 -21.5 1 0 83 -21.5 -1 0\n"
+	"N 0 70 -23.5 0 1 83 -22.5 -1 0 62.5 -22.5 1 0\n"
+	"N 0 81 -41 1 0 67 -29.5 -1 0 66 -20.5 0 -1 66 -51 0 1\n"
+	"N 0 73 -28.5 1 0 74.5 -28.5 -1 0\n"
+	"N 0 63 -36 1 0 74.5 -31.5 -1 0 83.5 -36 -1 0\n"
+	"N 0 77.5 -34.5 0 -1 83.5 -37 -1 0 63 -37 1 0\n"
+	"N 1 73.5 -43 1 0 75 -43 -1 0\n"
+	"N 1 73.5 -45 1 0 75 -45 -1 0\n"
+	"N 1 73.5 -47 1 0 75 -47 -1 0\n"
+	"N 1 73.5 -49 1 0 75 -48 -1 0\n"
+	"N 0 66.5 -46 -1 0 63 -46 1 0\n"
+	"N 0 81 -43 1 0 83.5 -46 -1 0\n"
+	"N 4 81 -42 1 0 64 -20.5 0 -1 67 -31.5 -1 0 65 -51 0 1 80.5 -28.5 1 0 74.5 -24.5 -1 0\n"
+	"N 0 65 -20.5 0 -1 67 -27.5 -1 0\n"
+	"N 0 67 -25.5 -1 0 64 -51 0 1\n"
+	"R 82.8118 -38.6394 86.1882 -37.3606\n"
+	"R 72.546 -15.2788 85.454 -12.7212\n"
+	"R 63.74 -53 64.26 -51\n"
+	"R 60.5 -22.76 62.5 -22.24\n"
+	"R 65.74 -53 66.26 -51\n"
+	"R 61 -37.26 63 -36.74\n"
+	"R 67.6863 -52.1394 70.3137 -50.8606\n"
+	"R 82.9621 -35.1394 86.0379 -33.8606\n"
+	"R 83.5 -36.26 85.5 -35.74\n"
+	"R 74.5 -25.5 80.0512 -23.5\n"
+	"R 83.5 -37.26 85.5 -36.74\n"
+	"R 74.5 -34.5 80.5 -26.5\n"
+	"R 63.6609 -54.6394 67.3391 -53.3606\n"
+	"R 83 -21.76 85 -21.24\n"
+	"R 83 -22.76 85 -22.24\n"
+	"R 60.5 -21.76 62.5 -21.24\n"
+	"R 83.5 -46.26 85.5 -45.74\n"
+	"R 64.74 -53 65.26 -51\n"
+	"R 65.74 -20.5 66.26 -18.5\n"
+	"R 67 -32.5 73 -23.5\n"
+	"R 58.7364 -19.6394 62.2636 -18.3606\n"
+	"R 63.74 -20.5 64.26 -18.5\n"
+	"R 67.6863 -19.6394 70.3137 -18.3606\n"
+	"R 58.7364 -52.1394 62.2636 -50.8606\n"
+	"R 64.74 -20.5 65.26 -18.5\n"
+	"R 82.3494 -20.6394 85.6506 -19.3606\n"
+	"R 82.3494 -24.1394 85.6506 -22.8606\n"
+	"R 61 -46.26 63 -45.74\n"
+	"R 65 -17.5 68 -15.5\n"
+	"R 60.7242 -45.1394 63.2758 -43.8606\n"
+	"R 61 -36.26 63 -35.74\n"
+	"R 63.1609 -15.1394 66.8391 -13.8606\n"
+	"R 75 -49 81 -40\n"
+	"R 69 -18 72 -16\n"
+	"R 83.6371 -45.1394 85.3629 -43.8606\n"
+	"R 87 -37 90 -35\n"
+	"R 87.5 -39 90.5 -37\n"
+	"R 66.5 -50 73.5 -42\n"
+	"P 64 -53 0 -1\n"
+	"P 66 -53 0 -1\n"
+	"P 61 -37 -1 0\n"
+	"P 80.5 -31.5 1 0\n"
+	"P 77.5 -26.5 0 1\n"
+	"P 85 -21.5 1 0\n"
+	"P 85 -22.5 1 0\n"
+	"P 85.5 -46 1 0\n"
+	"P 65 -53 0 -1\n"
+	"P 64 -18.5 0 1\n"
+	"P 61 -46 -1 0\n"
+	"P 61 -36 -1 0\n"
+	"P 81 -48 1 0\n"
+	"P 75 -41 -1 0\n"
+	"P 75 -42 -1 0\n"
+	"P 75 -44 -1 0\n"
+	"P 75 -46 -1 0\n";
+
+GridInput parseInput(const char *text) {
+	GridInput in;
+	std::istringstream lines(text);
+	std::string line;
+	while (std::getline(lines, line)) {
+		std::istringstream s(line);
+		std::string t;
+		s >> t;
+		if (t == "N") {
+			GridNet n;
+			s >> n.root;
+			GridPin p;
+			while (s >> p.x >> p.y >> p.dx >> p.dy) n.pins.push_back(p);
+			in.nets.push_back(n);
+		} else if (t == "R") {
+			GridRect r;
+			s >> r.l >> r.b >> r.r >> r.t;
+			in.obstacles.push_back(r);
+		} else if (t == "P") {
+			GridPin p;
+			s >> p.x >> p.y >> p.dx >> p.dy;
+			in.foreignPins.push_back(p);
+		}
+	}
+	return in;
+}
+}  // namespace
+
+TEST_CASE("grid: a wire from the top of a packed cell to the bottom goes down the middle, not round it") {
+	GridInput in = parseInput(BIT_CELL);
+	REQUIRE(in.nets.size() == 19);
+	GridOutput out = routeGrid(in);
+	size_t big = 0;
+	for (size_t i = 0; i < in.nets.size(); i++) {
+		REQUIRE(out.ok[i]);
+		CHECK(validTree(out.routes[i], in.nets[i].pins.size()));
+		if (in.nets[i].pins.size() > in.nets[big].pins.size()) big = i;
+		for (size_t j = 0; j < i; j++) CHECK_FALSE(sharesLine(out.routes[i], out.routes[j]));
+	}
+	REQUIRE(in.nets[big].pins.size() == 6);
+	CHECK(routeLength(out.routes[big]) < 85.0f);
+	float total = 0.0f;
+	for (const RouteResult &r : out.routes) total += routeLength(r);
+	CHECK(total < 325.0f);   // 339.5 going round
+}
+
+// ...but not at any price: past a short bus with many wires, round the end
+// is still the better picture.
+TEST_CASE("grid: a wire past a short bus of many wires still goes round its end") {
+	GridInput in = busAndCrossingWire(10, 4.0f);
+	GridOutput out = routeGrid(in);
+	for (size_t i = 0; i < in.nets.size(); i++) REQUIRE(out.ok[i]);
+	int cross = 0;
+	for (size_t i = 0; i + 1 < in.nets.size(); i++) cross += crossings(out.routes[i], out.routes.back());
+	CHECK(cross == 0);
 }
