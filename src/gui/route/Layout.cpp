@@ -96,6 +96,7 @@ private:
 	std::vector<Margin> margin;
 	std::map<int, std::vector<std::pair<int, int>>> netPins;
 	std::vector<std::set<int>> succ, pred;
+	std::vector<char> fed;            // driven by something: an output, not a source
 	std::vector<int> layer;
 	int maxL = 0;
 	std::vector<std::vector<int>> layers;
@@ -145,9 +146,13 @@ private:
 	}
 
 	// Signal flow: each driver points at what it drives; feedback loops are
-	// broken at the edge that points back, walking left to right.
+	// broken at the edge that points back, walking left to right. Parts are
+	// never turned, so the columns follow the way the pins face: a wire from
+	// a pin facing left to one facing right (a gate drawn turned round, its
+	// output on its left) runs right to left, and the part it feeds goes in
+	// an earlier column -- otherwise every such wire loops round both parts.
 	void flow() {
-		succ.assign(n, {}); pred.assign(n, {});
+		succ.assign(n, {}); pred.assign(n, {}); fed.assign(n, 0);
 		for (const auto &np : netPins) {
 			std::set<int> drivers, sinks;
 			for (const auto &pp : np.second) (N[pp.first].pins[pp.second].output ? drivers : sinks).insert(pp.first);
@@ -168,7 +173,23 @@ private:
 				for (int s : sinks) if (CX(s) < CX(left)) left = s;
 				drivers.insert(left); sinks.erase(left);
 			}
-			for (int u : drivers) for (int v : sinks) if (u != v) { succ[u].insert(v); pred[v].insert(u); }
+			// Which way each part's pins on this net face: +1 right, -1 left.
+			auto facing = [&](int v) {
+				int f = 0;
+				for (const auto &pp : np.second)
+					if (pp.first == v) { const int dx = N[v].pins[pp.second].dx; f += (dx > 0) - (dx < 0); }
+				return (f > 0) - (f < 0);
+			};
+			for (int u0 : drivers)
+				for (int v0 : sinks) {
+					if (u0 == v0) continue;
+					fed[v0] = 1;
+					int u = u0, v = v0;
+					// The driver's pin facing left and the sink's facing right
+					// (or one of them so, the other up or down): right to left.
+					if (facing(u) - facing(v) < 0) std::swap(u, v);
+					succ[u].insert(v); pred[v].insert(u);
+				}
 		}
 		std::vector<int> order(n);
 		for (size_t i = 0; i < n; i++) order[i] = (int)i;
@@ -191,7 +212,8 @@ private:
 	}
 
 	// Columns: the longest path from an input; outputs all in the last one;
-	// a source (a switch, ground) right before the first thing it feeds.
+	// a source (a switch, ground) right before the first thing it feeds, or
+	// right after it when it is drawn turned round, feeding leftward.
 	void layering() {
 		layer.assign(n, 0);
 		std::vector<int> indeg(n, 0), queue;
@@ -205,7 +227,7 @@ private:
 		}
 		maxL = 0;
 		for (size_t v = 0; v < n; v++) maxL = std::max(maxL, layer[v]);
-		for (size_t v = 0; v < n; v++) if (succ[v].empty() && !pred[v].empty()) layer[v] = maxL;
+		for (size_t v = 0; v < n; v++) if (succ[v].empty() && !pred[v].empty() && fed[v]) layer[v] = maxL;
 		for (size_t v = 0; v < n; v++) {
 			if (!pred[v].empty() || succ[v].empty()) continue;
 			int first = maxL;

@@ -91,6 +91,27 @@ TEST_CASE("layout rearrange: a chain placed backwards comes out left to right") 
 		for (size_t j = i + 1; j < 3; j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
 }
 
+TEST_CASE("layout rearrange: parts drawn turned round flow right to left") {
+	LayoutInput in;
+	in.mode = TidyMode::Rearrange;
+	// switch -> inverter -> label, every part turned round (outputs on the
+	// left, inputs on the right), drawn jumbled up
+	LayoutNode out = box(8, 0, 2, 2);   out.pins = { pin(10, 1, 1, 1, false) };
+	LayoutNode gate = box(0, 3, 2, 2);  gate.pins = { pin(2, 4, 1, 0, false), pin(0, 4, -1, 1, true) };
+	LayoutNode src = box(4, -3, 2, 2);  src.pins = { pin(4, -2, -1, 0, true) };
+	in.nodes = { out, gate, src };
+	auto off = layoutGates(in);
+	auto px = [&](size_t v, size_t p) { return in.nodes[v].pins[p].x + off[v].first; };
+	auto py = [&](size_t v, size_t p) { return in.nodes[v].pins[p].y + off[v].second; };
+	// each wire leaves its driver leftward straight into the pin it feeds
+	CHECK(px(2, 0) > px(1, 0));
+	CHECK(px(1, 1) > px(0, 0));
+	CHECK(py(2, 0) == doctest::Approx(py(1, 0)));
+	CHECK(py(1, 1) == doctest::Approx(py(0, 0)));
+	for (size_t i = 0; i < 3; i++)
+		for (size_t j = i + 1; j < 3; j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
+}
+
 TEST_CASE("layout rearrange: a fixed gate and an unwired label stay put") {
 	LayoutInput in;
 	in.mode = TidyMode::Rearrange;
