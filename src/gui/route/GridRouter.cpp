@@ -261,9 +261,10 @@ private:
 	std::vector<long long> cand;
 	std::vector<int> candNodes, scratch, runTargets;
 	size_t polishWork = 0;
+	size_t workCap = 0;  // polishNet stops scoring once polishWork reaches this
 	int candCross = 0;   // crossings of the last candidate scored
 	void polish();
-	bool polishNet(int k);
+	bool polishNet(int k, size_t allowance);
 	float scoreCandidate(int k, bool &valid);
 	void setNodes(NetState &ns);
 };
@@ -746,6 +747,13 @@ const float DETOUR_RATIO = 1.4f;     // routed length over the pins' tree length
 const float DETOUR_MIN = 8.0f;       // ...and at least this much longer (world units)
 const float UNLOOP_CROSS = 5.0f;     // a crossing's price in the second try (steps)
 const float CROSS_WORTH = 4.0f;      // world units of wire a crossing is worth to the eye
+// Its share of the work, so the polish after it always gets its own: polish
+// work (see POLISH_WORK) and search steps, checked before each net it tries.
+// Each wire in a comparison, in the old layout and the new, is polished with
+// the same allowance, so neither is judged rougher than the other.
+const size_t UNLOOP_WORK = 3000000;
+const size_t UNLOOP_POPS = 600000;
+const size_t UNLOOP_NET_WORK = 150000;
 }
 
 float Router::netLength(int k) const {
@@ -800,6 +808,7 @@ void Router::unloop() {
 	std::vector<char> tried(K, 0);
 	eMark.assign((size_t)N * 2, 0); nMark.assign(N, 0); nDeg.assign(N, 0); nFlags.assign(N, 0);
 	pStamp = 0;
+	const size_t work0 = polishWork, pops0 = popsUsed;
 	for (int sweep = 0; sweep < 2; sweep++) {
 		std::vector<std::pair<float, int>> worst;
 		for (size_t k = 0; k < K; k++) {
@@ -811,7 +820,7 @@ void Router::unloop() {
 		for (const auto &w : worst) {
 			const int k = w.second;
 			tried[k] = 1;
-			if (popsUsed >= TOTAL_POPS) break;
+			if (popsUsed >= TOTAL_POPS || polishWork - work0 >= UNLOOP_WORK || popsUsed - pops0 >= UNLOOP_POPS) break;
 			if (!nets[k].ok) continue;
 			// The nets in the way: any lying in the box round k's pins.
 			float bx0 = FLT_MAX, bx1 = -FLT_MAX, by0 = FLT_MAX, by1 = -FLT_MAX;
@@ -855,8 +864,9 @@ void Router::unloop() {
 			};
 			float len0 = 0.0f;
 			int on0 = 0, on1 = 0;
-			// Both ways judged polished, as they will be shown.
-			for (int j : group) polishNet(j);
+			// Both ways judged polished, as they will be shown, every wire of
+			// the group with the same allowance each way.
+			for (int j : group) polishNet(j, UNLOOP_NET_WORK);
 			const float score0 = score(len0, on0);
 			std::vector<NetState> keep;
 			for (int j : group) { keep.push_back(nets[j]); commit(j, -1); }
@@ -866,6 +876,7 @@ void Router::unloop() {
 			float bestKs = FLT_MAX;
 			const int P = (int)pins[k].size();
 			for (int r = 0; r < P && r < 8; r++) {
+				if (r > 0 && popsUsed - pops0 >= UNLOOP_POPS) break;   // out of steps: the best so far
 				rootOverride = r;
 				if (!routeNet(k, false)) continue;
 				int on = 0;
@@ -890,12 +901,13 @@ void Router::unloop() {
 				}
 				for (size_t i = 1; i < group.size() && good; i++) {
 					if (clear[i]) continue;
+					if (popsUsed - pops0 >= UNLOOP_POPS + UNLOOP_POPS / 2) { good = false; break; }   // out of steps: keep the old
 					if (routeNet(group[i], false)) { commit(group[i], +1); placed.push_back(group[i]); }
 					else good = false;
 				}
 			}
 			float len1 = 0.0f, score1 = FLT_MAX;
-			if (good) for (int j : group) polishNet(j);
+			if (good) for (int j : group) polishNet(j, UNLOOP_NET_WORK);
 			if (good) score1 = score(len1, on1);
 			const bool keepNew = good && on1 <= on0 && score1 < score0 - 1e-3f && len1 < len0 - DETOUR_MIN / 2;
 			if (!keepNew) {
@@ -921,7 +933,12 @@ void Router::unloop() {
 namespace {
 const int SLIDE_REACH = 30;              // grid steps either side
 const int SLIDE_SLACK = 4;               // ...and at most this far out of the tree's box
-const size_t POLISH_WORK = 40000000;     // edge visits, the whole run
+// Work, in candidate edges scored (about 0.05 us each): the whole polish
+// after the detour repair, and at most this share of it for one wire, so a
+// big net (a clock across the page) can't take it all. The detour repair has
+// its own, smaller allowance (UNLOOP_WORK).
+const size_t POLISH_WORK = 6000000;
+const size_t POLISH_NET_WORK = 800000;
 const int POLISH_ROUNDS = 12;            // moves kept per wire per sweep
 const float POLISH_BAD = 1000.0f;        // on another wire's line, or a corner on it
 }
@@ -1031,10 +1048,12 @@ float Router::scoreCandidate(int k, bool &valid) {
 	return c;
 }
 
-bool Router::polishNet(int k) {
+bool Router::polishNet(int k, size_t allowance) {
 	NetState &ns = nets[k];
 	if (!ns.ok || ns.relaxed || pins[k].size() < 2) return false;
 	for (const PinInfo &p : pins[k]) if (p.node < 0) return false;
+	if (allowance == 0) return false;
+	workCap = polishWork + allowance;
 	commit(k, -1);
 	std::vector<long long> E(ns.edges.begin(), ns.edges.end());
 	auto load = [&](const std::vector<long long> &v) {
@@ -1051,7 +1070,7 @@ bool Router::polishNet(int k) {
 	if (valid) {
 		std::vector<long long> bestE;
 		std::vector<char> inE;
-		for (int round = 0; round < POLISH_ROUNDS && polishWork < POLISH_WORK; round++) {
+		for (int round = 0; round < POLISH_ROUNDS && polishWork < workCap; round++) {
 			// Maximal straight runs: (axis, line, from, to), node indices.
 			struct Run { bool h; int line, a, b; };
 			std::vector<Run> runs;
@@ -1084,6 +1103,7 @@ bool Router::polishNet(int k) {
 			int bestCross = baseCross;
 			bestE.clear();
 			for (const Run &r : runs) {
+				if (polishWork >= workCap) break;
 				// Where the rest of the tree meets the run: those nodes get a
 				// connector across to the slid run.
 				std::vector<int> attach;
@@ -1137,7 +1157,7 @@ bool Router::polishNet(int k) {
 					return false;
 				};
 				for (int sgn = -1; sgn <= 1; sgn += 2) {
-					for (int t = 1; t <= SLIDE_REACH; t++) {
+					for (int t = 1; t <= SLIDE_REACH && polishWork < workCap; t++) {
 						const int line = r.line + sgn * t;
 						if (line < 0 || line >= lines) break;
 						if (r.h ? (line < by0 - SLIDE_SLACK || line > by1 + SLIDE_SLACK) : (line < bx0 - SLIDE_SLACK || line > bx1 + SLIDE_SLACK)) break;
@@ -1192,8 +1212,10 @@ void Router::polish() {
 	// Two sweeps: the second only for the wires that moved in the first (the
 	// ones that stayed rarely gain from their neighbours' moves).
 	std::vector<char> moved(nets.size(), 0);
-	for (size_t k = 0; k < nets.size() && polishWork < POLISH_WORK; k++) moved[k] = polishNet((int)k) ? 1 : 0;
-	for (size_t k = 0; k < nets.size() && polishWork < POLISH_WORK; k++) if (moved[k]) polishNet((int)k);
+	const size_t end = polishWork + POLISH_WORK;
+	auto left = [&] { return std::min(POLISH_NET_WORK, end - std::min(end, polishWork)); };
+	for (size_t k = 0; k < nets.size() && polishWork < end; k++) moved[k] = polishNet((int)k, left()) ? 1 : 0;
+	for (size_t k = 0; k < nets.size() && polishWork < end; k++) if (moved[k]) polishNet((int)k, left());
 }
 
 GridOutput Router::run() {

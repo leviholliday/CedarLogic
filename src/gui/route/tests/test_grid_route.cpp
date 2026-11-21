@@ -468,3 +468,29 @@ TEST_CASE("grid: a wire past a short bus of many wires still goes round its end"
 	for (size_t i = 0; i + 1 < in.nets.size(); i++) cross += crossings(out.routes[i], out.routes.back());
 	CHECK(cross == 0);
 }
+
+// Polish has a work limit for the whole page, and a share of it for each wire:
+// a clock reaching parts all over a big page, polished first, used to take it
+// all, and the wires after it kept their staircases.
+TEST_CASE("grid: after a big clock net, a wire later on the page is still polished") {
+	GridInput in;
+	const int cols = 12, rows = 24;
+	for (int c = 0; c < cols; c++) for (int r = 0; r < rows; r++)
+		in.obstacles.push_back({ c * 8.0f, r * 6.0f, c * 8.0f + 3, r * 6.0f + 3 });
+	GridNet clk;
+	for (int c = 0; c < cols; c++) for (int r = 0; r < rows; r++) clk.pins.push_back(pin(c * 8.0f, r * 6.0f + 2.0f, -1, 0));
+	in.nets.push_back(clk);
+	// The staircase from "a wire climbing past a part", off to the right.
+	const float X = cols * 8.0f + 20;
+	in.obstacles.push_back({ X + 7, -5, X + 9, -2 });
+	in.obstacles.push_back({ X + 15, 5, X + 17, 8 });
+	GridNet n;
+	n.pins = { pin(X, -5, 1, 0), pin(X + 20, 3.5f, -1, 0) };
+	in.nets.push_back(n);
+	GridOutput out = routeGrid(in);
+	REQUIRE(out.ok[0]);
+	REQUIRE(out.ok[1]);
+	CHECK(validTree(out.routes[0], clk.pins.size()));
+	CHECK(validTree(out.routes[1], 2));
+	CHECK(corners(out.routes[1]) == 2);
+}
