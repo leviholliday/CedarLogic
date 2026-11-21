@@ -38,6 +38,9 @@ const float LEVEL_SHARE = 0.25f;     // Rearrange: groups level their wires only
 const float CAPTION_REACH = 2.0f;    // Rearrange: unwired text this close to a part goes with it...
 const float CAPTION_MAX_H = 2.0f;    // ...unless it is taller (a title)...
 const float CAPTION_MAX_W = 8.0f;    // ...or wider than this (a sentence)
+const int SINK_STRETCH = 1;          // Rearrange: an output goes to the last column only from this few columns before it
+const float WIDE = 2.0f;             // Rearrange: groups side by side wider than this many times their height may stack instead
+const float GREW = 1.5f;             // ...and this many times wider for their height than they were drawn
 
 enum Align { LEFT, RIGHT, CENTER };
 
@@ -117,6 +120,7 @@ private:
 	struct Edge { int a; float oa; int fa; int b; float ob; int fb; };
 	std::vector<Edge> E;
 	std::vector<std::vector<int>> inc;
+	std::map<int, std::pair<int, int>> chain;  // placeholder -> the parts its wire runs between
 
 	float snap(float v) const { return std::round(v / step) * step; }
 	float snapUp(float v) const { return std::ceil(v / step - EPS) * step; }
@@ -135,6 +139,15 @@ private:
 			if (p.dx < 0) l = true; else if (p.dx > 0) r = true; else other = true;
 		}
 		return !other && (l != r);
+	}
+	// A part with a single wired pin, and that pin on its top or bottom (a
+	// tie point hanging under a wire, an LED over one): it wants to sit a
+	// step off the wire rather than level with it.
+	bool hangs(int v) const {
+		if (isDummy(v)) return false;
+		int k = 0, vert = 0;
+		for (const LayoutPin &p : N[v].pins) if (p.net >= 0) { k++; if (p.dx == 0 && p.dy != 0) vert++; }
+		return k == 1 && vert == 1;
 	}
 	// Room between two neighbors in a column: one-pin parts wired from the
 	// side (input and output labels) sit edge to edge, as people draw them,
@@ -231,7 +244,16 @@ private:
 		}
 		maxL = 0;
 		for (size_t v = 0; v < n; v++) maxL = std::max(maxL, layer[v]);
-		for (size_t v = 0; v < n; v++) if (succ[v].empty() && !pred[v].empty() && fed[v]) layer[v] = maxL;
+		// Lights go in the last column, so they line up as a row of
+		// outputs; so does any other output whose driver is near the end
+		// anyway. One fed from far back (a label, a tie point) sits right
+		// after its driver instead of at the end of a long wire.
+		for (size_t v = 0; v < n; v++) {
+			if (!succ[v].empty() || pred[v].empty() || !fed[v]) continue;
+			int last = 0;
+			for (int u : pred[v]) last = std::max(last, layer[u]);
+			layer[v] = (N[v].indicator || last + 1 >= maxL - SINK_STRETCH) ? maxL : last + 1;
+		}
 		for (size_t v = 0; v < n; v++) {
 			if (!pred[v].empty() || succ[v].empty()) continue;
 			int first = maxL;
@@ -322,7 +344,7 @@ private:
 		// A wire that skips columns gets a placeholder in each column it
 		// passes: a gate standing in its way counts as a crossing, and the
 		// placeholder keeps a lane open for it.
-		E.clear();
+		E.clear(); chain.clear();
 		for (const auto &np : netPins)
 			for (const auto &pa : np.second)
 				for (const auto &pb : np.second) {
@@ -338,6 +360,7 @@ private:
 					for (int l = layer[u] + 1; l < layer[v]; l++) {
 						const float f = (float)(l - layer[u]) / (float)(layer[v] - layer[u]);
 						const int d = (int)y.size();
+						chain[d] = { u, v };
 						y.push_back(y[u] + ou + (y[v] + ov - y[u] - ou) * f);
 						cy0.push_back(y.back());
 						h.push_back(0.0f);
@@ -479,9 +502,21 @@ private:
 						// a top input).
 						std::vector<float> cand;
 						bool anyUp = false, anyDown = false, anySide = false;
+						// A part hanging off one wire follows the part it's wired to
+						// rather than pulling it off its others: each would wait for the
+						// other, and the pair would stay wherever it was drawn.
+						bool others = false;
+						auto far = [&](int e) {
+							const int o = E[e].a == v ? E[e].b : E[e].a;
+							if (!isDummy(o)) return o;
+							const auto &c = chain[o];
+							return c.first == v ? c.second : c.first;
+						};
+						for (int e : inc[v]) if (!hangs(far(e))) others = true;
 						for (int e : inc[v]) {
 							const Edge &ed = E[e];
 							const bool mine = ed.a == v;
+							if (others && !isDummy(v) && hangs(far(e))) continue;
 							const float po = mine ? ed.oa : ed.ob, qo = mine ? ed.ob : ed.oa;
 							const int pf = mine ? ed.fa : ed.fb, qf = mine ? ed.fb : ed.fa;
 							const float qy = y[mine ? ed.b : ed.a] + qo;
@@ -1158,40 +1193,113 @@ private:
 
 	// Lays the group out, moving its gates, and returns where it ended up.
 	Box layoutGroup(const std::vector<int> &S) {
+		const Box drawn = boxOf(S);
 		for (int axis = 0; axis < 2 && S.size() >= 4; axis++) {
 			const bool alongX = axis == 0;
 			std::vector<std::vector<int>> pieces = splitAlong(S, alongX);
 			if (pieces.size() < 2) continue;
 			std::vector<Box> boxes;
 			for (const auto &piece : pieces) boxes.push_back(layoutGroup(piece));
-			// Back together in drawn order, a lane of room per wire between.
-			std::vector<int> placed = pieces[0];
-			Box all = boxes[0];
-			for (size_t k = 1; k < pieces.size(); k++) {
-				const float gap = std::min(GROUP_GAP + (float)crossingNets(placed, pieces[k]), GROUP_GAP_MAX);
-				float dx, dy;
-				const float minSpan = alongX ? std::min(all.t - all.b, boxes[k].t - boxes[k].b)
-				                             : std::min(all.r - all.l, boxes[k].r - boxes[k].l);
-				float lev;
-				const bool leveled = level(placed, pieces[k], !alongX, lev) && std::fabs(lev) <= LEVEL_SHARE * minSpan;
-				if (alongX) {
-					dx = all.r + gap - boxes[k].l;
-					dy = leveled ? lev : boxes[k - 1].t - boxes[k].t;
-				} else {
-					dy = all.b - gap - boxes[k].t;
-					dx = leveled ? lev : boxes[k - 1].l - boxes[k].l;
+			if (alongX) {
+				// Groups drawn side by side that come out long and thin (each
+				// grew wider than it was drawn) go in rows instead, top to
+				// bottom in drawn order, so the whole is about as wide for its
+				// height as it was drawn.
+				const std::vector<size_t> breaks = rowBreaks(boxes, drawn);
+				if (breaks.size() > 1) {
+					std::vector<std::vector<int>> rows;
+					std::vector<Box> rowBoxes;
+					for (size_t r = 0; r < breaks.size(); r++) {
+						const size_t e = r + 1 < breaks.size() ? breaks[r + 1] : pieces.size();
+						std::vector<std::vector<int>> rp(pieces.begin() + breaks[r], pieces.begin() + e);
+						std::vector<Box> rb(boxes.begin() + breaks[r], boxes.begin() + e);
+						rowBoxes.push_back(join(rp, rb, true));
+						rows.push_back({});
+						for (const auto &pc : rp) rows.back().insert(rows.back().end(), pc.begin(), pc.end());
+					}
+					return join(rows, rowBoxes, false);
 				}
-				dx = snap(dx); dy = snap(dy);
-				for (int v : pieces[k]) { ox[v] += dx; oy[v] += dy; }
-				boxes[k].l += dx; boxes[k].r += dx; boxes[k].b += dy; boxes[k].t += dy;
-				all.l = std::min(all.l, boxes[k].l); all.r = std::max(all.r, boxes[k].r);
-				all.b = std::min(all.b, boxes[k].b); all.t = std::max(all.t, boxes[k].t);
-				placed.insert(placed.end(), pieces[k].begin(), pieces[k].end());
 			}
-			return all;
+			return join(pieces, boxes, alongX);
 		}
 		layoutLeaf(S);
 		return boxOf(S);
+	}
+
+	// Where each row of groups starts, for groups laid out side by side in
+	// one row: one row unless that is over WIDE times as wide as it is tall
+	// and grew GREW times wider for its height than it was drawn; else
+	// the number of rows that best matches the drawn shape (at least square),
+	// each row taking the next groups in order.
+	std::vector<size_t> rowBreaks(const std::vector<Box> &boxes, const Box &drawn) const {
+		const size_t m = boxes.size();
+		auto shape = [&](const std::vector<size_t> &br, float &w, float &h) {
+			w = 0.0f; h = 0.0f;
+			for (size_t r = 0; r < br.size(); r++) {
+				const size_t e = r + 1 < br.size() ? br[r + 1] : m;
+				float rw = 0.0f, rh = 0.0f;
+				for (size_t k = br[r]; k < e; k++) {
+					rw += boxes[k].r - boxes[k].l + (k > br[r] ? GROUP_GAP : 0.0f);
+					rh = std::max(rh, boxes[k].t - boxes[k].b);
+				}
+				w = std::max(w, rw); h += rh + (r ? GROUP_GAP : 0.0f);
+			}
+		};
+		std::vector<size_t> best = { 0 };
+		float w, h;
+		shape(best, w, h);
+		const float dw = drawn.r - drawn.l, dh = drawn.t - drawn.b;
+		const float drawnShape = dh > EPS ? dw / dh : FLT_MAX;
+		if (h <= EPS || w / h <= std::max(WIDE, GREW * drawnShape)) return best;
+		const float target = std::max(1.0f, drawnShape);
+		float bestErr = std::fabs(std::log(w / h / target));
+		float total = 0.0f;
+		for (const Box &bx : boxes) total += bx.r - bx.l;
+		for (size_t k = 2; k <= m; k++) {
+			// Fill each row up to an even share of the total width.
+			std::vector<size_t> br = { 0 };
+			float rw = 0.0f;
+			for (size_t i = 0; i < m; i++) {
+				const float bw = boxes[i].r - boxes[i].l;
+				if (i > 0 && br.size() < k && (rw + bw / 2.0f > total / k || m - i == k - br.size())) { br.push_back(i); rw = 0.0f; }
+				rw += bw;
+			}
+			if (br.size() != k) continue;
+			shape(br, w, h);
+			const float err = std::fabs(std::log(w / h / target));
+			if (err < bestErr - EPS) { bestErr = err; best = br; }
+		}
+		return best;
+	}
+
+	// Puts laid-out pieces back together in order, side by side (alongX) or
+	// one under another, a lane of room per wire between, leveling the wires
+	// between neighbors when that costs little.
+	Box join(const std::vector<std::vector<int>> &pieces, std::vector<Box> boxes, bool alongX) {
+		std::vector<int> placed = pieces[0];
+		Box all = boxes[0];
+		for (size_t k = 1; k < pieces.size(); k++) {
+			const float gap = std::min(GROUP_GAP + (float)crossingNets(placed, pieces[k]), GROUP_GAP_MAX);
+			float dx, dy;
+			const float minSpan = alongX ? std::min(all.t - all.b, boxes[k].t - boxes[k].b)
+			                             : std::min(all.r - all.l, boxes[k].r - boxes[k].l);
+			float lev;
+			const bool leveled = level(placed, pieces[k], !alongX, lev) && std::fabs(lev) <= LEVEL_SHARE * minSpan;
+			if (alongX) {
+				dx = all.r + gap - boxes[k].l;
+				dy = leveled ? lev : boxes[k - 1].t - boxes[k].t;
+			} else {
+				dy = all.b - gap - boxes[k].t;
+				dx = leveled ? lev : boxes[k - 1].l - boxes[k].l;
+			}
+			dx = snap(dx); dy = snap(dy);
+			for (int v : pieces[k]) { ox[v] += dx; oy[v] += dy; }
+			boxes[k].l += dx; boxes[k].r += dx; boxes[k].b += dy; boxes[k].t += dy;
+			all.l = std::min(all.l, boxes[k].l); all.r = std::max(all.r, boxes[k].r);
+			all.b = std::min(all.b, boxes[k].b); all.t = std::max(all.t, boxes[k].t);
+			placed.insert(placed.end(), pieces[k].begin(), pieces[k].end());
+		}
+		return all;
 	}
 
 	// The shift (x when inX, else y) that best levels the wires between the

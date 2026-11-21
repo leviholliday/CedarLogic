@@ -321,6 +321,90 @@ TEST_CASE("layout rearrange: a group wired top to bottom keeps flowing down") {
 		for (size_t j = i + 1; j < 3; j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
 }
 
+TEST_CASE("layout rearrange: an output fed from far back sits right after its driver, a light stays last") {
+	// a chain src -> g1 -> g2 -> g3 -> g4 -> end, and a label tapped off g1
+	LayoutInput in;
+	in.mode = TidyMode::Rearrange;
+	LayoutNode src = box(0, 0, 2, 2); src.pins = { pin(2, 1, 1, 0, true) };
+	in.nodes.push_back(src);
+	for (int i = 0; i < 4; i++) {
+		const float X = 4.0f + 4.0f * i;
+		LayoutNode g = box(X, 0, 2, 2); g.pins = { pin(X, 1, -1, i, false), pin(X + 2, 1, 1, i + 1, true) };
+		in.nodes.push_back(g);
+	}
+	LayoutNode end = box(20, 0, 2, 2); end.pins = { pin(20, 1, -1, 4, false) };
+	LayoutNode tap = box(20, -3, 2, 2); tap.pins = { pin(20, -2, -1, 1, false) };   // drawn at the far end
+	LayoutNode led = box(20, -6, 2, 2); led.indicator = true; led.pins = { pin(20, -5, -1, 1, false) };   // a light, also off g1
+	in.nodes.push_back(end); in.nodes.push_back(tap); in.nodes.push_back(led);
+	auto off = layoutGates(in);
+	// the light still goes in the last column, with the end of the chain
+	CHECK(left(in, off, 7) == doctest::Approx(left(in, off, 5)));
+	// the tap shares g2's column, not the last one
+	CHECK(left(in, off, 6) < left(in, off, 3));
+	CHECK(left(in, off, 6) > left(in, off, 1));
+	CHECK(left(in, off, 5) > left(in, off, 4));
+	for (size_t i = 0; i < in.nodes.size(); i++)
+		for (size_t j = i + 1; j < in.nodes.size(); j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
+}
+
+TEST_CASE("layout rearrange: a tie point hanging off a wire doesn't hold its gate where it was drawn") {
+	// switch -> gate D -> gate G, G drawn well below D; G's output runs on to an
+	// inverter and a light, and to a tie point hanging under the wire (its
+	// pin on its top). G comes up level with D.
+	LayoutInput in;
+	in.mode = TidyMode::Rearrange;
+	LayoutNode sw = box(0, -12, 2, 2);    sw.pins = { pin(2, -11, 1, 0, true) };
+	LayoutNode d = box(4, 0, 2, 2);       d.pins = { pin(4, 1, -1, 0, false), pin(6, 1, 1, 1, true) };
+	LayoutNode g = box(8, -12, 2, 2);     g.pins = { pin(8, -11, -1, 1, false), pin(10, -11, 1, 2, true) };
+	LayoutNode inv = box(12, -12, 2, 2);  inv.pins = { pin(12, -11, -1, 2, false), pin(14, -11, 1, 3, true) };
+	LayoutNode led = box(16, -12, 2, 2);  led.pins = { pin(16, -11, -1, 3, false) };
+	LayoutNode tie = box(12, -15, 1, 1);  tie.pins = { { 12.5f, -14, 0, 1, 2, false } };
+	in.nodes = { sw, d, g, inv, led, tie };
+	auto off = layoutGates(in);
+	CHECK(1 + off[1].second == doctest::Approx(-11 + off[2].second));
+	for (size_t i = 0; i < in.nodes.size(); i++)
+		for (size_t j = i + 1; j < in.nodes.size(); j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
+}
+
+TEST_CASE("layout rearrange: groups drawn side by side that come out long stack instead") {
+	// two chains of six parts, each drawn folded into two rows of three,
+	// the chains side by side and joined by one wire: laid out flat in
+	// one row they would be far wider than drawn
+	LayoutInput in;
+	in.mode = TidyMode::Rearrange;
+	for (int g = 0; g < 2; g++) {
+		const float X = 14.0f * g;
+		const int n0 = 10 * g;
+		for (int i = 0; i < 6; i++) {
+			const float x = X + 4.0f * (i % 3), yb = i < 3 ? 3.0f : 0.0f;
+			LayoutNode p = box(x, yb, 2, 2);
+			if (i > 0) p.pins.push_back(pin(x, yb + 1, -1, n0 + i - 1, false));
+			if (i < 5) p.pins.push_back(pin(x + 2, yb + 1, 1, n0 + i, true));
+			if (g == 0 && i == 5) p.pins.push_back(pin(x + 2, yb + 1, 1, 9, true));
+			if (g == 1 && i == 0) p.pins.push_back(pin(x, yb + 1.5f, -1, 9, false));
+			in.nodes.push_back(p);
+		}
+	}
+	auto off = layoutGates(in);
+	float l = 1e9f, r = -1e9f, b = 1e9f, t = -1e9f;
+	for (size_t i = 0; i < in.nodes.size(); i++) {
+		l = std::min(l, in.nodes[i].l + off[i].first); r = std::max(r, in.nodes[i].r + off[i].first);
+		b = std::min(b, in.nodes[i].b + off[i].second); t = std::max(t, in.nodes[i].t + off[i].second);
+	}
+	CHECK((r - l) / (t - b) < 8.0f);
+	// the first group (drawn on the left) on top, wholly above the second
+	float lowA = 1e9f, highB = -1e9f;
+	for (int i = 0; i < 6; i++) {
+		lowA = std::min(lowA, in.nodes[i].b + off[i].second);
+		highB = std::max(highB, top(in, off, 6 + i));
+	}
+	CHECK(lowA > highB);
+	// each still reads left to right
+	for (int i = 0; i + 1 < 6; i++) { CHECK(left(in, off, i) < left(in, off, i + 1)); CHECK(left(in, off, 6 + i) < left(in, off, 7 + i)); }
+	for (size_t i = 0; i < in.nodes.size(); i++)
+		for (size_t j = i + 1; j < in.nodes.size(); j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
+}
+
 TEST_CASE("layout rearrange: the same input gives the same answer") {
 	LayoutInput in = keypadInverters();
 	auto a = layoutGates(in), b = layoutGates(in);
