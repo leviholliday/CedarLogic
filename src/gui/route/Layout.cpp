@@ -40,6 +40,8 @@ const float CAPTION_MAX_H = 2.0f;    // ...unless it is taller (a title)...
 const float CAPTION_MAX_W = 8.0f;    // ...or wider than this (a sentence)
 const int SINK_STRETCH = 1;          // Rearrange: an output goes to the last column only from this few columns before it
 const float WIDE = 2.0f;             // Rearrange: groups side by side wider than this many times their height may stack instead
+const int LEVEL_ROUNDS = 12;         // Rearrange: passes leveling each part with what it's wired to
+const double GIVE_WAY = 0.01;        // Rearrange: how hard a part hanging off a wire holds its place in a column
 const float GREW = 1.5f;             // ...and this many times wider for their height than they were drawn
 
 enum Align { LEFT, RIGHT, CENTER };
@@ -117,10 +119,11 @@ private:
 	std::vector<std::vector<int>> members;      // rep -> its stack in order along x
 	// a in an earlier column than b; fa/fb: how each end's pin leaves its
 	// part, 0 sideways (or a placeholder), +1 up, -1 down.
-	struct Edge { int a; float oa; int fa; int b; float ob; int fb; };
+	struct Edge { int a; float oa; int fa; int b; float ob; int fb; int net; };
 	std::vector<Edge> E;
 	std::vector<std::vector<int>> inc;
 	std::map<int, std::pair<int, int>> chain;  // placeholder -> the parts its wire runs between
+	std::vector<int> dlayer;                   // placeholder's column, by index past n
 
 	float snap(float v) const { return std::round(v / step) * step; }
 	float snapUp(float v) const { return std::ceil(v / step - EPS) * step; }
@@ -252,7 +255,7 @@ private:
 			if (!succ[v].empty() || pred[v].empty() || !fed[v]) continue;
 			int last = 0;
 			for (int u : pred[v]) last = std::max(last, layer[u]);
-			layer[v] = (N[v].indicator || last + 1 >= maxL - SINK_STRETCH) ? maxL : last + 1;
+			layer[v] = (!hangs((int)v) && (N[v].indicator || last + 1 >= maxL - SINK_STRETCH)) ? maxL : last + 1;
 		}
 		for (size_t v = 0; v < n; v++) {
 			if (!pred[v].empty() || succ[v].empty()) continue;
@@ -344,7 +347,7 @@ private:
 		// A wire that skips columns gets a placeholder in each column it
 		// passes: a gate standing in its way counts as a crossing, and the
 		// placeholder keeps a lane open for it.
-		E.clear(); chain.clear();
+		E.clear(); chain.clear(); dlayer.clear();
 		for (const auto &np : netPins)
 			for (const auto &pa : np.second)
 				for (const auto &pb : np.second) {
@@ -365,10 +368,11 @@ private:
 						cy0.push_back(y.back());
 						h.push_back(0.0f);
 						layers[l].push_back(d);
-						E.push_back({ prev, po, pf, d, 0.0f, 0 });
+						dlayer.push_back(l);
+						E.push_back({ prev, po, pf, d, 0.0f, 0, np.first });
 						prev = d; po = 0.0f; pf = 0;
 					}
-					E.push_back({ prev, po, pf, v, ov, fv });
+					E.push_back({ prev, po, pf, v, ov, fv, np.first });
 				}
 		const size_t total = y.size();
 		inc.assign(total, {});
@@ -403,11 +407,6 @@ private:
 			});
 			stack(lay);
 		};
-		for (auto &lay : layers) stack(lay);
-		for (int sweep = 0; sweep < 6; sweep++) {
-			for (int l = 1; l <= maxL; l++) reorder(layers[l], -1);
-			for (int l = maxL - 1; l >= 0; l--) reorder(layers[l], +1);
-		}
 		// With `above` over `below`, a wire of above's reaching lower than one of
 		// below's on the same side is a crossing.
 		auto crossings = [&](int above, int below) {
@@ -419,6 +418,11 @@ private:
 			}
 			return c;
 		};
+		for (auto &lay : layers) stack(lay);
+		for (int sweep = 0; sweep < 6; sweep++) {
+			for (int l = 1; l <= maxL; l++) reorder(layers[l], -1);
+			for (int l = maxL - 1; l >= 0; l--) reorder(layers[l], +1);
+		}
 		for (int sweep = 0; sweep < 4; sweep++) {
 			bool any = false;
 			for (auto &lay : layers) {
@@ -469,25 +473,28 @@ private:
 			for (int l = lo; l < hi; l++) gap[l] += 1.0f;
 		}
 		for (int l = 1; l <= maxL; l++) colX[l] = colX[l - 1] + colW[l - 1] + 1.5f + gap[l - 1];
-		newL.assign(n, 0.0f);
-		for (size_t v = 0; v < n; v++) {
-			if (rep[v] != (int)v) continue;
-			const int l = layer[v];
-			const float base = colX[l] + extL[l], w = bodyW((int)v);
-			float left;
-			switch (alignOf(N[v])) {
-			case LEFT:   left = base; break;
-			case RIGHT:  left = base + colB[l] - w; break;
-			default:     left = snap(base + (colB[l] - w) / 2.0f); break;
+		auto placeX = [&]() {
+			newL.assign(n, 0.0f);
+			for (size_t v = 0; v < n; v++) {
+				if (rep[v] != (int)v) continue;
+				const int l = layer[v];
+				const float base = colX[l] + extL[l], w = bodyW((int)v);
+				float left;
+				switch (alignOf(N[v])) {
+				case LEFT:   left = base; break;
+				case RIGHT:  left = base + colB[l] - w; break;
+				default:     left = snap(base + (colB[l] - w) / 2.0f); break;
+				}
+				left -= ml((int)v);
+				for (int m : members[v]) { newL[m] = left; left += W(m) + LAYER_GAP_Y; }
 			}
-			left -= ml((int)v);
-			for (int m : members[v]) { newL[m] = left; left += W(m) + LAYER_GAP_Y; }
-		}
+		};
+		placeX();
 
 		// Heights: each gate as level as it can get with what it's wired to,
 		// each passing wire as straight, keeping the column's order and
 		// spacing (pool-adjacent-violators).
-		for (int round = 0; round < 4; round++) {
+		for (int round = 0; round < LEVEL_ROUNDS; round++) {
 			for (int pass = 0; pass < 2; pass++) {
 				for (int li = 0; li <= maxL; li++) {
 					const int l = pass == 0 ? li : maxL - li;
@@ -528,6 +535,21 @@ private:
 							if (pf > 0) anyUp = true; else if (pf < 0) anyDown = true; else anySide = true;
 							cand.push_back(py - po);
 						}
+						if (cand.empty() && !inc[v].empty()) {
+							// Wired only pin to pin from top or bottom (one tie
+							// point hanging off another): sit a step off the other
+							// part's pin rather than stay wherever it was drawn.
+							for (int e : inc[v]) {
+								const Edge &ed = E[e];
+								const bool mine = ed.a == v;
+								const float po = mine ? ed.oa : ed.ob, qo = mine ? ed.ob : ed.oa;
+								const int pf = mine ? ed.fa : ed.fb;
+								cand.push_back(y[mine ? ed.b : ed.a] + qo + (pf < 0 ? PIN_OFFSET : -PIN_OFFSET) - po);
+							}
+							std::sort(cand.begin(), cand.end());
+							want.push_back(cand[cand.size() / 2]);
+							continue;
+						}
 						if (cand.empty()) { want.push_back(y[v]); continue; }
 						std::sort(cand.begin(), cand.end());
 						// Pins that all leave upward (a keypad's, in a group that
@@ -543,6 +565,26 @@ private:
 				}
 			}
 		}
+		{
+			// Room between columns: a lane for each wire that turns there,
+			// half of one for a wire running straight across (the router
+			// still lays it beside the others).
+			auto colOf = [&](int v) { return isDummy(v) ? dlayer[v - n] : layer[v]; };
+			std::vector<std::set<int>> turning(maxL + 1);
+			for (const Edge &ed : E) {
+				const float ya = y[ed.a] + ed.oa, yb = y[ed.b] + ed.ob;
+				if (std::fabs(ya - yb) > EPS || ed.fa != 0 || ed.fb != 0) turning[std::min(colOf(ed.a), colOf(ed.b))].insert(ed.net);
+			}
+			for (const auto &np : netPins) {
+				// a net with pins in one column runs up or down beside it
+				std::map<int, int> per;
+				for (const auto &pp : np.second) per[layer[pp.first]]++;
+				for (const auto &pc : per) if (pc.second > 1 && pc.first < maxL) turning[pc.first].insert(np.first);
+			}
+			for (int l = 0; l <= maxL; l++) gap[l] = (gap[l] + (float)turning[l].size()) / 2.0f;
+			for (int l = 1; l <= maxL; l++) colX[l] = colX[l - 1] + colW[l - 1] + 1.5f + gap[l - 1];
+			placeX();
+		}
 		// Placeholders have done their job; stacked parts sit level with their lead.
 		for (auto &lay : layers)
 			lay.erase(std::remove_if(lay.begin(), lay.end(), [&](int v) { return isDummy(v); }), lay.end());
@@ -557,18 +599,22 @@ private:
 		const size_t m = lay.size();
 		std::vector<float> S(m, 0.0f);
 		for (size_t i = 1; i < m; i++) S[i] = S[i - 1] + h[lay[i - 1]] / 2.0f + h[lay[i]] / 2.0f + gapBetween(lay[i - 1], lay[i]);
-		std::vector<double> sum;
+		// A part hanging off a wire gives way to its neighbors rather than
+		// pushing them (and through them everything they're wired to) off
+		// their wires.
+		std::vector<double> sum, wt;
 		std::vector<int> cnt;
 		for (size_t i = 0; i < m; i++) {
-			sum.push_back(want[i] + S[i]); cnt.push_back(1);
-			while (sum.size() >= 2 && sum[sum.size() - 2] / cnt[cnt.size() - 2] < sum.back() / cnt.back()) {
-				sum[sum.size() - 2] += sum.back(); cnt[cnt.size() - 2] += cnt.back();
-				sum.pop_back(); cnt.pop_back();
+			const double w = hangs(lay[i]) ? GIVE_WAY : 1.0;
+			sum.push_back(w * (want[i] + S[i])); wt.push_back(w); cnt.push_back(1);
+			while (sum.size() >= 2 && sum[sum.size() - 2] / wt[wt.size() - 2] < sum.back() / wt.back()) {
+				sum[sum.size() - 2] += sum.back(); wt[wt.size() - 2] += wt.back(); cnt[cnt.size() - 2] += cnt.back();
+				sum.pop_back(); wt.pop_back(); cnt.pop_back();
 			}
 		}
 		size_t i = 0;
 		for (size_t b = 0; b < sum.size(); b++)
-			for (int k = 0; k < cnt[b]; k++, i++) y[lay[i]] = (float)(sum[b] / cnt[b]) - S[i];
+			for (int k = 0; k < cnt[b]; k++, i++) y[lay[i]] = (float)(sum[b] / wt[b]) - S[i];
 	}
 };
 
@@ -1217,7 +1263,7 @@ private:
 						rows.push_back({});
 						for (const auto &pc : rp) rows.back().insert(rows.back().end(), pc.begin(), pc.end());
 					}
-					return join(rows, rowBoxes, false);
+					return join(rows, rowBoxes, false, true);
 				}
 			}
 			return join(pieces, boxes, alongX);
@@ -1274,12 +1320,14 @@ private:
 
 	// Puts laid-out pieces back together in order, side by side (alongX) or
 	// one under another, a lane of room per wire between, leveling the wires
-	// between neighbors when that costs little.
-	Box join(const std::vector<std::vector<int>> &pieces, std::vector<Box> boxes, bool alongX) {
+	// between neighbors when that costs little. Rows of groups (stacked only
+	// because side by side was too wide) go under each other with their left
+	// edges lined up and the usual gap between groups.
+	Box join(const std::vector<std::vector<int>> &pieces, std::vector<Box> boxes, bool alongX, bool rows = false) {
 		std::vector<int> placed = pieces[0];
 		Box all = boxes[0];
 		for (size_t k = 1; k < pieces.size(); k++) {
-			const float gap = std::min(GROUP_GAP + (float)crossingNets(placed, pieces[k]), GROUP_GAP_MAX);
+			const float gap = rows ? GROUP_GAP : std::min(GROUP_GAP + (float)crossingNets(placed, pieces[k]), GROUP_GAP_MAX);
 			float dx, dy;
 			const float minSpan = alongX ? std::min(all.t - all.b, boxes[k].t - boxes[k].b)
 			                             : std::min(all.r - all.l, boxes[k].r - boxes[k].l);
@@ -1290,7 +1338,7 @@ private:
 				dy = leveled ? lev : boxes[k - 1].t - boxes[k].t;
 			} else {
 				dy = all.b - gap - boxes[k].t;
-				dx = leveled ? lev : boxes[k - 1].l - boxes[k].l;
+				dx = (leveled && !rows) ? lev : boxes[k - 1].l - boxes[k].l;
 			}
 			dx = snap(dx); dy = snap(dy);
 			for (int v : pieces[k]) { ox[v] += dx; oy[v] += dy; }

@@ -399,10 +399,50 @@ TEST_CASE("layout rearrange: groups drawn side by side that come out long stack 
 		highB = std::max(highB, top(in, off, 6 + i));
 	}
 	CHECK(lowA > highB);
+	// left edges lined up, and only a small gap between the rows
+	float leftA = 1e9f, leftB = 1e9f;
+	for (int i = 0; i < 6; i++) { leftA = std::min(leftA, left(in, off, i)); leftB = std::min(leftB, left(in, off, 6 + i)); }
+	CHECK(leftA == doctest::Approx(leftB));
+	CHECK(lowA - highB < 3.5f);
 	// each still reads left to right
 	for (int i = 0; i + 1 < 6; i++) { CHECK(left(in, off, i) < left(in, off, i + 1)); CHECK(left(in, off, 6 + i) < left(in, off, 7 + i)); }
 	for (size_t i = 0; i < in.nodes.size(); i++)
 		for (size_t j = i + 1; j < in.nodes.size(); j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
+}
+
+TEST_CASE("layout rearrange: a tie point wired to a pin underneath a part sits under it") {
+	// switch -> g1 -> g2 -> light, and a tie point drawn far below wired by
+	// the pin on its top to a pin on g2's bottom: nothing level to line up
+	// with, but it still comes up under g2 instead of staying where drawn
+	LayoutInput in;
+	in.mode = TidyMode::Rearrange;
+	LayoutNode sw = box(0, 0, 2, 2);      sw.pins = { pin(2, 1, 1, 0, true) };
+	LayoutNode g1 = box(4, 0, 2, 2);      g1.pins = { pin(4, 1, -1, 0, false), pin(6, 1, 1, 1, true) };
+	LayoutNode g2 = box(8, 0, 2, 2);      g2.pins = { pin(8, 1, -1, 1, false), pin(10, 1, 1, 2, true), { 9, 0, 0, -1, 3, true } };
+	LayoutNode led = box(12, 0, 2, 2);    led.pins = { pin(12, 1, -1, 2, false) };
+	LayoutNode tie = box(12, -20, 1, 1);  tie.pins = { { 12.5f, -19, 0, 1, 3, false } };
+	in.nodes = { sw, g1, g2, led, tie };
+	auto off = layoutGates(in);
+	const float g2bottom = 0 + off[2].second, tieTop = -19 + off[4].second;
+	CHECK(tieTop < g2bottom);
+	CHECK(g2bottom - tieTop <= 3.0f);
+	for (size_t i = 0; i < in.nodes.size(); i++)
+		for (size_t j = i + 1; j < in.nodes.size(); j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
+}
+
+TEST_CASE("layout rearrange: wires running straight across need no lane of their own") {
+	// a part with six outputs wired straight across to a part with six inputs
+	LayoutInput in;
+	in.mode = TidyMode::Rearrange;
+	LayoutNode a = box(0, 0, 2, 7), b = box(20, 0, 2, 7);
+	for (int i = 0; i < 6; i++) { a.pins.push_back(pin(2, 1.0f + i, 1, i, true)); b.pins.push_back(pin(20, 1.0f + i, -1, i, false)); }
+	LayoutNode c = box(0, -6, 2, 2); c.pins = { pin(2, -5, 1, 9, true) };
+	LayoutNode d = box(20, -6, 2, 2); d.pins = { pin(20, -5, -1, 9, false) };
+	in.nodes = { a, b, c, d };
+	auto off = layoutGates(in);
+	for (int i = 0; i < 6; i++) CHECK(1.0f + i + off[0].second == doctest::Approx(1.0f + i + off[1].second));
+	// the old rule kept a lane per wire: 1.5 + 7 between the columns
+	CHECK(left(in, off, 1) - (in.nodes[0].r + off[0].first) < 7.0f);
 }
 
 TEST_CASE("layout rearrange: the same input gives the same answer") {
