@@ -339,6 +339,49 @@ std::vector<WireReshape> rerouteWires(GUICanvas* page, const std::vector<unsigne
 		}
 	}
 
+	// Whether wire j's route is so much longer than its drawn shape that the
+	// drawn one will be kept (see below), judged before it is adopted.
+	auto takesDrawn = [&](size_t j) {
+		if (moved[j] || !sound[j] || !out.ok[j]) return false;
+		float was = 0.0f, now = 0.0f;
+		for (const auto& seg : wires[j]->getSegmentMap())
+			was += std::fabs(seg.second.end.x - seg.second.begin.x) + std::fabs(seg.second.end.y - seg.second.begin.y);
+		for (const Segment& sg : out.routes[j].segments) now += std::fabs(sg.ex - sg.bx) + std::fabs(sg.ey - sg.by);
+		return now > was * 1.5f + 3.0f;
+	};
+	// Whether a shape for wire k runs along another wire's line: the wires
+	// done so far as they are now, the rest as routed (or as drawn, when they
+	// will keep that or go back to it). The long way round beats one wire
+	// lying on another.
+	auto liesOnAnother = [&](size_t k, const std::map<long, wireSegment>& shape) {
+		const float e = 0.02f;
+		auto shares = [&](float ax, float ay, float bx, float by) {
+			for (const auto& sg : shape) {
+				const float cx = sg.second.begin.x, cy = sg.second.begin.y, dx = sg.second.end.x, dy = sg.second.end.y;
+				const bool v1 = std::fabs(ax - bx) < e, v2 = std::fabs(cx - dx) < e;
+				const bool h1 = std::fabs(ay - by) < e, h2 = std::fabs(cy - dy) < e;
+				if (v1 && v2 && !h1 && !h2 && std::fabs(ax - cx) < e &&
+				    std::min(std::max(ay, by), std::max(cy, dy)) > std::max(std::min(ay, by), std::min(cy, dy)) + e) return true;
+				if (h1 && h2 && !v1 && !v2 && std::fabs(ay - cy) < e &&
+				    std::min(std::max(ax, bx), std::max(cx, dx)) > std::max(std::min(ax, bx), std::min(cx, dx)) + e) return true;
+			}
+			return false;
+		};
+		std::map<unsigned long, size_t> indexOf;
+		for (size_t j = 0; j < wires.size(); j++) indexOf[wireIds[j]] = j;
+		for (auto& we : *page->getWireList()) {
+			if (we.second == nullptr || we.second == wires[k]) continue;
+			auto it = indexOf.find(we.first);
+			const size_t j = it == indexOf.end() ? (size_t)-1 : it->second;
+			if (j != (size_t)-1 && j > k && out.ok[j] && !kept[j] && !keepsDrawn(j) && !takesDrawn(j)) {
+				for (const Segment& sg : out.routes[j].segments) if (shares(sg.bx, sg.by, sg.ex, sg.ey)) return true;
+				continue;
+			}
+			for (const auto& sg : we.second->getSegmentMap())
+				if (shares(sg.second.begin.x, sg.second.begin.y, sg.second.end.x, sg.second.end.y)) return true;
+		}
+		return false;
+	};
 	for (size_t k = 0; k < wires.size(); k++) {
 		guiWire* w = wires[k];
 		const auto before = w->getSegmentMap();
@@ -368,7 +411,7 @@ std::vector<WireReshape> rerouteWires(GUICanvas* page, const std::vector<unsigne
 				return len;
 			};
 			const float was = length(before), now = length(w->getSegmentMap());
-			if (now > was * 1.5f + 3.0f) {
+			if (now > was * 1.5f + 3.0f && !liesOnAnother(k, before)) {
 				const auto fresh = w->getSegmentMap();
 				w->setSegmentMap(before);
 				if (!shapeIsSound(page, w, w->getSegmentMap())) w->setSegmentMap(fresh);
