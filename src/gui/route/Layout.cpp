@@ -30,6 +30,11 @@ const int CHANNEL_MIN = 3;           // Keep Layout: a gap between two parts tha
 const float LANE_SIDE = 1.25f;       // ...with this much room for each between parts side by side
 const float LANE_ROW = 0.5f;         // ...and this much between parts one above another
 const int CHANNEL_SLACK = 1;         // ...is opened when it is more than this many grid steps short
+const long CHANNEL_WORK = 4000000;   // ...and the whole pass stops after this many part-to-part checks
+const float CHANNEL_DENSE = 0.25f;   // ...and isn't made along an axis where more than this share of gaps are short
+const int CHANNEL_DENSE_MIN = 4;     // ...(and more than this many)
+const float CHANNEL_SPREAD = 0.1f;   // ...and moves no part further in all than this share of the page
+const float CHANNEL_REACH = 8.0f;    // ...or this, if more
 const float BLOCK_GAP = 1.5f;        // Rearrange: room kept between separate circuits
 const float PIN_OFFSET = 1.5f;        // Rearrange: how far an up/down pin sits off its wire
 const int PICTURE_PARTS = 4;         // this many overlapping parts are a drawing
@@ -816,16 +821,37 @@ private:
 	bool acrossOverlap(int a, int b, int ax) const { return pl(a, ax) < ph(b, ax) - EPS && pl(b, ax) < ph(a, ax) - EPS; }
 
 	// Parts lined up in a column, close together: they move sideways as one.
-	std::vector<int> columnOf(int v) const {
-		std::vector<int> col = { v };
-		for (size_t c = 0; c < col.size(); c++)
-			for (size_t k = 0; k < n; k++) {
-				const int j = (int)k, i = col[c];
-				if (std::find(col.begin(), col.end(), j) != col.end() || vOverlap(i, j, 0.0f)) continue;
-				if (std::max(B(i) - T(j), B(j) - T(i)) > STACK_GAP) continue;
-				if (std::fabs(CX(i) - CX(j)) <= EPS || std::fabs(L(i) - L(j)) <= EPS || std::fabs(R(i) - R(j)) <= EPS) col.push_back(j);
+	// Worked out for every part at once, again only after something moves.
+	std::vector<int> colOf;                    // part -> its column
+	std::vector<std::vector<int>> colParts;    // column -> its parts
+	bool colsStale = true;
+	long chanWork = 0;                         // checks made so far by openChannels
+	void findColumns() {
+		std::vector<int> parent(n);
+		for (size_t i = 0; i < n; i++) parent[i] = (int)i;
+		std::function<int(int)> find = [&](int x) { return parent[x] == x ? x : parent[x] = find(parent[x]); };
+		for (size_t a = 0; a < n; a++)
+			for (size_t c = a + 1; c < n; c++) {
+				const int i = (int)a, j = (int)c;
+				if (vOverlap(i, j, 0.0f) || std::max(B(i) - T(j), B(j) - T(i)) > STACK_GAP) continue;
+				if (std::fabs(CX(i) - CX(j)) <= EPS || std::fabs(L(i) - L(j)) <= EPS || std::fabs(R(i) - R(j)) <= EPS)
+					parent[find(i)] = find(j);
 			}
-		return col;
+		std::map<int, int> id;
+		colOf.assign(n, 0);
+		colParts.clear();
+		for (size_t i = 0; i < n; i++) {
+			auto it = id.emplace(find((int)i), (int)colParts.size()).first;
+			if (it->second == (int)colParts.size()) colParts.emplace_back();
+			colOf[i] = it->second;
+			colParts[it->second].push_back((int)i);
+		}
+		chanWork += (long)(n * n / 2);
+		colsStale = false;
+	}
+	const std::vector<int> &columnOf(int v) {
+		if (colsStale) findColumns();
+		return colParts[colOf[v]];
 	}
 
 	// Moves `start` by `d` along the axis (dir +1 onwards, -1 back) and works
@@ -833,7 +859,7 @@ private:
 	// as the gap's own wires need, never onto them), parts lined up with it
 	// in a column when it goes sideways, and labels on a level wire from it.
 	// False if a part that can't move would have to.
-	bool cascade(int start, int ax, int dir, float d, std::map<int, float> &out) const {
+	bool cascade(int start, int ax, int dir, float d, std::map<int, float> &out) {
 		out.clear();
 		out[start] = d;
 		std::vector<int> todo = { start };
@@ -845,6 +871,8 @@ private:
 			const int v = todo.back();
 			todo.pop_back();
 			const float dv = out[v];
+			chanWork += (long)n;
+			if (chanWork > CHANNEL_WORK) return false;
 			if (ax) for (int k : columnOf(v)) raise(k, dv);
 			int pin = -1;
 			for (const LayoutPin &p : in.nodes[v].pins) {
@@ -874,22 +902,62 @@ private:
 		return true;
 	}
 
+	// Along one axis: how many parts have a neighbour ahead (`nb`), and how
+	// many of those gaps are short of their wires (`sh`).
+	void neighbours(int ax, int &nb, int &sh) {
+		nb = sh = 0;
+		for (size_t ia = 0; ia < n; ia++) {
+			int best = -1; float bg = FLT_MAX;
+			for (size_t ib = 0; ib < n; ib++) {
+				const int a = (int)ia, b = (int)ib;
+				if (a == b || (!movable[a] && !movable[b]) || !acrossOverlap(a, b, ax)) continue;
+				const float gap = lo(b, ax) - hi(a, ax);
+				if (gap < -EPS || gap >= bg) continue;
+				bg = gap; best = b;
+			}
+			chanWork += (long)n;
+			if (best < 0) continue;
+			nb++;
+			const float need = channelNeed((int)ia, best, ax);
+			if (need > 0.0f && bg < need - CHANNEL_SLACK * in.step - EPS) sh++;
+		}
+	}
 	// Gaps too narrow for the wires that turn in them open up: the parts on
 	// one side (the side that moves less) step away, with whatever they
-	// would close in on, never past each other.
+	// would close in on, never past each other. Never more than CHANNEL_WORK
+	// checks in all: past that it stops, and keeps the gaps it has opened.
+	// A page where many of the gaps are short is packed evenly, not jammed in
+	// a few places: that axis is left as drawn rather than spread out. Nor
+	// does any part go further than CHANNEL_SPREAD of the page (or
+	// CHANNEL_REACH) in all from here.
 	void openChannels() {
+		chanWork = 0;
+		colsStale = true;
+		bool dense[2];
+		float reach[2];
+		for (int ax = 0; ax < 2; ax++) {
+			int nb, sh;
+			neighbours(ax, nb, sh);
+			dense[ax] = sh > std::max(CHANNEL_DENSE_MIN, (int)(nb * CHANNEL_DENSE));
+			float l = FLT_MAX, h = -FLT_MAX;
+			for (size_t i = 0; i < n; i++) { l = std::min(l, lo((int)i, ax)); h = std::max(h, hi((int)i, ax)); }
+			reach[ax] = std::max(CHANNEL_REACH, CHANNEL_SPREAD * (h - l));
+		}
+		std::vector<float> went[2] = { std::vector<float>(n, 0.0f), std::vector<float>(n, 0.0f) };
 		for (int pass = 0; pass < 8; pass++) {
 			bool any = false;
 			for (int ax = 0; ax < 2; ax++)
-				for (size_t ia = 0; ia < n; ia++)
+				for (size_t ia = 0; ia < n && !dense[ax]; ia++)
 					for (size_t ib = 0; ib < n; ib++) {
 						const int a = (int)ia, b = (int)ib;
+						if (++chanWork > CHANNEL_WORK) return;
 						if (a == b || (!movable[a] && !movable[b]) || !acrossOverlap(a, b, ax)) continue;
 						const float gap = lo(b, ax) - hi(a, ax);
 						if (gap < -EPS) continue;
 						const float need = channelNeed(a, b, ax);
 						if (need <= 0.0f || gap >= need - CHANNEL_SLACK * in.step - EPS) continue;
 						bool blocked = false;
+						chanWork += (long)n;
 						for (size_t k = 0; k < n && !blocked; k++) {
 							const int j = (int)k;
 							if (j == a || j == b) continue;
@@ -900,6 +968,7 @@ private:
 						const float d = snapUp(need - gap);
 						std::map<int, float> fw, bw;
 						const bool okF = cascade(b, ax, 1, d, fw), okB = cascade(a, ax, -1, d, bw);
+						if (chanWork > CHANNEL_WORK) return;
 						if (!okF && !okB) continue;
 						auto cost = [&](const std::map<int, float> &m) {
 							float c = 0.0f;
@@ -914,7 +983,15 @@ private:
 						};
 						bool forward = okF && (!okB || cost(fw) <= cost(bw) + EPS);
 						if (okF && okB && twoWay(fw) != twoWay(bw)) forward = !twoWay(fw);
-						for (const auto &e : forward ? fw : bw) shift(e.first, ax, forward ? e.second : -e.second);
+						const std::map<int, float> &m = forward ? fw : bw;
+						bool far = false;
+						for (const auto &e : m) far = far || std::fabs(went[ax][e.first] + (forward ? e.second : -e.second)) > reach[ax] + EPS;
+						if (far) continue;
+						for (const auto &e : m) {
+							shift(e.first, ax, forward ? e.second : -e.second);
+							went[ax][e.first] += forward ? e.second : -e.second;
+						}
+						colsStale = true;
 						any = true;
 					}
 			if (!any) break;

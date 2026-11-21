@@ -658,3 +658,33 @@ TEST_CASE("layout keep: gates lined up in a column step aside together") {
 	for (size_t i = 0; i < in.nodes.size(); i++)
 		for (size_t j = i + 1; j < in.nodes.size(); j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
 }
+
+TEST_CASE("layout keep: a page packed evenly with gates is not blown up to make room for wires") {
+	// 20 columns half a unit apart, 15 rows a unit apart; each gate sends three
+	// wires out of its right side to the gate one row down in the next column.
+	// Every gap side by side is short of its wires: nowhere is locally jammed,
+	// so the page keeps its size, and the call returns.
+	const int C = 20, R = 15;
+	const float w = 4, h = 3;
+	LayoutInput in;
+	for (int c = 0; c < C; c++)
+		for (int r = 0; r < R; r++) in.nodes.push_back(box(c * (w + 0.5f), -r * (h + 1.0f) - h, w, h));
+	auto id = [&](int c, int r) { return c * R + r; };
+	int net = 0;
+	for (int c = 0; c + 1 < C; c++)
+		for (int r = 0; r < R; r++)
+			for (int k = 0; k < 3; k++, net++) {
+				LayoutNode &a = in.nodes[id(c, r)], &b = in.nodes[id(c + 1, (r + 1) % R)];
+				a.pins.push_back(pin(a.r, a.b + 0.5f + k, 1, net, true));
+				b.pins.push_back(pin(b.l, b.b + 0.5f + k, -1, net, false));
+			}
+	auto off = layoutGates(in);
+	REQUIRE(off.size() == in.nodes.size());
+	float most = 0.0f;
+	for (auto &o : off) most = std::max(most, std::fabs(o.first) + std::fabs(o.second));
+	CHECK(most <= 5.0f);
+	int hits = 0;
+	for (size_t i = 0; i < in.nodes.size(); i++)
+		for (size_t j = i + 1; j < in.nodes.size(); j++) hits += overlap(in.nodes[i], off[i], in.nodes[j], off[j]);
+	CHECK(hits == 0);
+}
