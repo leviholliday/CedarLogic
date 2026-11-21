@@ -563,7 +563,7 @@ TEST_CASE("layout keep: a keypad dropped onto an adder's inputs moves off them; 
 		for (size_t j = i + 1; j < 3; j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
 	// no adder input left under the keypad without room for its wire
 	const float l = 86 + off[2].first, r = 95 + off[2].first, b = 5 + off[2].second;
-	for (const LayoutPin &p : add.pins) CHECK((p.x < l - 1.5f || p.x > r + 1.5f || b >= p.y + 3.0f - 1e-3f));
+	for (const LayoutPin &p : add.pins) CHECK((p.x <= l - 1.5f + 1e-3f || p.x >= r + 1.5f - 1e-3f || b >= p.y + 3.0f - 1e-3f));
 }
 
 TEST_CASE("layout keep: a gate dropped onto the next part's inputs keeps its place and gets a channel") {
@@ -579,4 +579,82 @@ TEST_CASE("layout keep: a gate dropped onto the next part's inputs keeps its pla
 	CHECK(off[1].first == doctest::Approx(0.0f));
 	// room under the gate for the four wires to reach their pins
 	CHECK(-11.0f - (-10.0f + off[1].second) >= 1.0f + 4 * 0.5f - 1e-3f);
+}
+
+TEST_CASE("layout keep: a keypad dropped on the adder it feeds goes back above it, not beside it") {
+	LayoutInput in;
+	// as above: the second keypad lands on the adder's inputs. Moved off them
+	// to its side, its lower wires would come in under the pins they feed and
+	// loop back up; there's room above the adder, under the first keypad.
+	LayoutNode add = box(88, 2, 16, 8);
+	for (int k = 0; k < 4; k++) add.pins.push_back(upPin(94.0f - k, 10, 1, k, false));
+	for (int k = 0; k < 4; k++) add.pins.push_back(upPin(101.0f - k, 10, 1, 4 + k, false));
+	LayoutNode k1 = box(80, 23, 9, 12), k2 = box(86, 5, 9, 12);
+	for (int k = 0; k < 4; k++) k1.pins.push_back(pin(89, 26.0f + 2 * k, 1, k, true));
+	for (int k = 0; k < 4; k++) k2.pins.push_back(pin(95, 8.0f + 2 * k, 1, 4 + k, true));
+	in.nodes = { add, k1, k2 };
+	auto off = layoutGates(in);
+	for (size_t i = 0; i < 3; i++)
+		for (size_t j = i + 1; j < 3; j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
+	// every pin of the keypad above the adder's inputs, and left of them
+	for (const LayoutPin &p : k2.pins) {
+		CHECK(p.y + off[2].second >= 10.0f + 1.0f - 1e-3f);
+		CHECK(p.x + off[2].first <= 91.0f - 1.0f + 1e-3f);
+	}
+	CHECK(off[1].first == doctest::Approx(0.0f));
+	CHECK(off[1].second == doctest::Approx(0.0f));
+}
+
+namespace {
+// A gate turned round (inputs on its right) just left of an AND gate fed from
+// above: the wires into both have to run down the gap between them.
+LayoutInput channelCircuit(float gap, bool second) {
+	LayoutInput in;
+	LayoutNode top = box(0, 10, 16, 8);
+	for (int k = 0; k < 4; k++) top.pins.push_back(upPin(6.5f + k, 10, -1, k == 3 ? 4 : k, true));
+	LayoutNode org = box(0, second ? -4 : 0, 6, second ? 10 : 6);
+	org.pins = { pin(6, 5, 1, 3, false), pin(6, 3, 1, 2, false), pin(6, 1, 1, 4, false), pin(0, 3, -1, 5, true) };
+	LayoutNode g1 = box(6 + gap, 2, 6, 4);
+	g1.pins = { pin(6 + gap, 5, -1, 0, false), pin(6 + gap, 3, -1, 1, false), pin(12 + gap, 4, 1, 3, true) };
+	LayoutNode lab = box(-14, 2, 2, 2); lab.pins = { pin(-12, 3, 1, 5, false) };
+	in.nodes = { top, org, g1, lab };
+	if (second) {
+		LayoutNode g2 = box(6 + gap, -3, 6, 4);
+		g2.pins = { pin(6 + gap, 0, -1, 6, false), pin(6 + gap, -2, -1, 7, false) };
+		LayoutNode src = box(-14, -4, 2, 4); src.pins = { pin(-12, -1, 1, 6, true), pin(-12, -3, 1, 7, true) };
+		in.nodes.push_back(g2); in.nodes.push_back(src);
+	}
+	return in;
+}
+}  // namespace
+
+TEST_CASE("layout keep: a gap between parts side by side opens up for the wires that turn in it") {
+	LayoutInput in = channelCircuit(2, false);
+	auto off = layoutGates(in);
+	// five wires turn between the two gates: a lane and a quarter each, and one to spare
+	const float gap = (in.nodes[2].l + off[2].first) - (in.nodes[1].r + off[1].first);
+	CHECK(gap >= 6 * 1.25f - 0.5f - 1e-3f);
+	// only sideways, and nothing lands on anything
+	for (size_t i = 0; i < in.nodes.size(); i++) {
+		CHECK(off[i].second == doctest::Approx(0.0f));
+		for (size_t j = i + 1; j < in.nodes.size(); j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
+	}
+}
+
+TEST_CASE("layout keep: a gap a step short of its wires is left as drawn") {
+	LayoutInput in = channelCircuit(7.0f, false);
+	auto off = layoutGates(in);
+	for (auto &o : off) { CHECK(o.first == doctest::Approx(0.0f)); CHECK(o.second == doctest::Approx(0.0f)); }
+}
+
+TEST_CASE("layout keep: gates lined up in a column step aside together") {
+	// the gate on the left is the bigger part here, so the column moves
+	LayoutInput in = channelCircuit(2, true);
+	auto off = layoutGates(in);
+	CHECK(off[2].first > 0.0f);
+	CHECK(off[4].first == doctest::Approx(off[2].first));
+	CHECK(off[2].second == doctest::Approx(0.0f));
+	CHECK(off[4].second == doctest::Approx(0.0f));
+	for (size_t i = 0; i < in.nodes.size(); i++)
+		for (size_t j = i + 1; j < in.nodes.size(); j++) CHECK_FALSE(overlap(in.nodes[i], off[i], in.nodes[j], off[j]));
 }

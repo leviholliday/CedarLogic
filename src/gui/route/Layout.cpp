@@ -26,6 +26,10 @@ const float PIN_CLEAR = 1.0f;        // Keep Layout: room a wire needs in front 
 const float PIN_MARGIN = 1.5f;       // ...beside a part's edge, too
 const float RESETTLE_REACH = 12.0f;  // Keep Layout: furthest a part dropped onto another's pins moves to clear them...
 const float RESETTLE_CLEAR = 3.0f;   // ...and the room it leaves in front of every pin there
+const int CHANNEL_MIN = 3;           // Keep Layout: a gap between two parts that this many wires turn in wants a lane for each...
+const float LANE_SIDE = 1.25f;       // ...with this much room for each between parts side by side
+const float LANE_ROW = 0.5f;         // ...and this much between parts one above another
+const int CHANNEL_SLACK = 1;         // ...is opened when it is more than this many grid steps short
 const float BLOCK_GAP = 1.5f;        // Rearrange: room kept between separate circuits
 const float PIN_OFFSET = 1.5f;        // Rearrange: how far an up/down pin sits off its wire
 const int PICTURE_PARTS = 4;         // this many overlapping parts are a drawing
@@ -752,6 +756,169 @@ private:
 		// Again now nothing overlaps: parts pushed clear of each other land
 		// stacked in whatever order they were dropped.
 		orderLeaves(mv);
+		openChannels();
+	}
+
+	// ------------------------------------------------ Keep Layout: channels
+	// Measured along an axis: 0 runs down the page, 1 runs right. `lo`/`hi`
+	// are a part's near and far edge along it, `pl`/`ph` its span across it.
+	float lo(int i, int ax) const { return ax ? L(i) : -T(i); }
+	float hi(int i, int ax) const { return ax ? R(i) : -B(i); }
+	float pl(int i, int ax) const { return ax ? B(i) : L(i); }
+	float ph(int i, int ax) const { return ax ? T(i) : R(i); }
+	void shift(int i, int ax, float d) { if (ax) ox[i] += d; else oy[i] -= d; }
+	// A pin's place along the axis, across it, and which way along it it faces.
+	void pinAt(int v, const LayoutPin &p, int ax, float &u, float &w, int &f) const {
+		const float x = p.x + ox[v], y = p.y + oy[v];
+		if (ax) { u = x; w = y; f = p.dx; } else { u = -y; w = x; f = -p.dy; }
+	}
+
+	// A pin whose wire runs straight on, level, to a pin facing it: it needs
+	// no lane of its own in the gap it crosses.
+	bool runsStraight(int v, const LayoutPin &p, int ax) const {
+		float u, w; int f;
+		pinAt(v, p, ax, u, w, f);
+		auto it = netPins.find(p.net);
+		if (f == 0 || it == netPins.end()) return false;
+		for (const auto &qq : it->second) {
+			const LayoutPin &q = in.nodes[qq.first].pins[qq.second];
+			if (&q == &p) continue;
+			float qu, qw; int qf;
+			pinAt(qq.first, q, ax, qu, qw, qf);
+			if (qf == -f && std::fabs(qw - w) < EPS && (qu - u) * f > -EPS) return true;
+		}
+		return false;
+	}
+
+	// The room the gap from `a` to the part `b` after it wants: a lane for
+	// each wire that has to turn in it -- leaving a pin of one facing the
+	// other, and not running straight across -- and one more beside them;
+	// 0 when fewer than CHANNEL_MIN wires turn there, or either side is a
+	// part with one wire (a label, a ground): that wire is one of them.
+	float channelNeed(int a, int b, int ax) const {
+		int pin = -1;
+		if (wires(a, pin) < 2 || wires(b, pin) < 2) return 0.0f;
+		const float l = std::max(pl(a, ax), pl(b, ax)) - PIN_MARGIN, h = std::min(ph(a, ax), ph(b, ax)) + PIN_MARGIN;
+		std::set<int> nets;
+		for (int side = 0; side < 2; side++) {
+			const int v = side ? b : a;
+			for (const LayoutPin &p : in.nodes[v].pins) {
+				if (p.net < 0) continue;
+				float u, w; int f;
+				pinAt(v, p, ax, u, w, f);
+				if (f != (side ? -1 : 1) || w <= l || w >= h || runsStraight(v, p, ax)) continue;
+				nets.insert(p.net);
+			}
+		}
+		return (int)nets.size() >= CHANNEL_MIN ? (float)(nets.size() + 1) * (ax ? LANE_SIDE : LANE_ROW) : 0.0f;
+	}
+
+	bool acrossOverlap(int a, int b, int ax) const { return pl(a, ax) < ph(b, ax) - EPS && pl(b, ax) < ph(a, ax) - EPS; }
+
+	// Parts lined up in a column, close together: they move sideways as one.
+	std::vector<int> columnOf(int v) const {
+		std::vector<int> col = { v };
+		for (size_t c = 0; c < col.size(); c++)
+			for (size_t k = 0; k < n; k++) {
+				const int j = (int)k, i = col[c];
+				if (std::find(col.begin(), col.end(), j) != col.end() || vOverlap(i, j, 0.0f)) continue;
+				if (std::max(B(i) - T(j), B(j) - T(i)) > STACK_GAP) continue;
+				if (std::fabs(CX(i) - CX(j)) <= EPS || std::fabs(L(i) - L(j)) <= EPS || std::fabs(R(i) - R(j)) <= EPS) col.push_back(j);
+			}
+		return col;
+	}
+
+	// Moves `start` by `d` along the axis (dir +1 onwards, -1 back) and works
+	// out what has to go with it: parts it would close a gap on (only as far
+	// as the gap's own wires need, never onto them), parts lined up with it
+	// in a column when it goes sideways, and labels on a level wire from it.
+	// False if a part that can't move would have to.
+	bool cascade(int start, int ax, int dir, float d, std::map<int, float> &out) const {
+		out.clear();
+		out[start] = d;
+		std::vector<int> todo = { start };
+		auto raise = [&](int k, float by) {
+			float &cur = out[k];
+			if (by > cur + EPS) { cur = by; todo.push_back(k); }
+		};
+		for (size_t guard = 0; !todo.empty() && guard < 64 * n; guard++) {
+			const int v = todo.back();
+			todo.pop_back();
+			const float dv = out[v];
+			if (ax) for (int k : columnOf(v)) raise(k, dv);
+			int pin = -1;
+			for (const LayoutPin &p : in.nodes[v].pins) {
+				if (p.net < 0) continue;
+				for (const auto &qq : netPins.at(p.net)) {
+					const int k = qq.first;
+					if (k == v || wires(k, pin) != 1) continue;
+					float u, w, qu, qw; int f, qf;
+					pinAt(v, p, ax, u, w, f);
+					pinAt(k, in.nodes[k].pins[qq.second], ax, qu, qw, qf);
+					if (f == 0 && qf == 0 && std::fabs(qu - u) < EPS) raise(k, dv);
+				}
+			}
+			for (size_t kk = 0; kk < n; kk++) {
+				const int k = (int)kk;
+				if (k == v || !acrossOverlap(v, k, ax)) continue;
+				const bool ahead = dir > 0 ? lo(k, ax) >= hi(v, ax) - EPS : hi(k, ax) <= lo(v, ax) + EPS;
+				if (!ahead) continue;
+				const float before = dir > 0 ? lo(k, ax) - hi(v, ax) : lo(v, ax) - hi(k, ax);
+				const float keep = std::max(0.0f, std::min(before, std::max(STACK_GAP, dir > 0 ? channelNeed(v, k, ax) : channelNeed(k, v, ax))));
+				const float after = before - dv + (out.count(k) ? out[k] : 0.0f);
+				if (keep - after > EPS) raise(k, (out.count(k) ? out[k] : 0.0f) + snapUp(keep - after));
+			}
+		}
+		if (!todo.empty()) return false;
+		for (const auto &m : out) if (!movable[m.first]) return false;
+		return true;
+	}
+
+	// Gaps too narrow for the wires that turn in them open up: the parts on
+	// one side (the side that moves less) step away, with whatever they
+	// would close in on, never past each other.
+	void openChannels() {
+		for (int pass = 0; pass < 8; pass++) {
+			bool any = false;
+			for (int ax = 0; ax < 2; ax++)
+				for (size_t ia = 0; ia < n; ia++)
+					for (size_t ib = 0; ib < n; ib++) {
+						const int a = (int)ia, b = (int)ib;
+						if (a == b || (!movable[a] && !movable[b]) || !acrossOverlap(a, b, ax)) continue;
+						const float gap = lo(b, ax) - hi(a, ax);
+						if (gap < -EPS) continue;
+						const float need = channelNeed(a, b, ax);
+						if (need <= 0.0f || gap >= need - CHANNEL_SLACK * in.step - EPS) continue;
+						bool blocked = false;
+						for (size_t k = 0; k < n && !blocked; k++) {
+							const int j = (int)k;
+							if (j == a || j == b) continue;
+							blocked = lo(j, ax) < lo(b, ax) && hi(j, ax) > hi(a, ax) &&
+							          pl(j, ax) < std::min(ph(a, ax), ph(b, ax)) && ph(j, ax) > std::max(pl(a, ax), pl(b, ax));
+						}
+						if (blocked) continue;
+						const float d = snapUp(need - gap);
+						std::map<int, float> fw, bw;
+						const bool okF = cascade(b, ax, 1, d, fw), okB = cascade(a, ax, -1, d, bw);
+						if (!okF && !okB) continue;
+						auto cost = [&](const std::map<int, float> &m) {
+							float c = 0.0f;
+							for (const auto &e : m) c += W(e.first) * H(e.first) * e.second;
+							return c;
+						};
+						// Parts wired on one side only (a keypad, a display) step back
+						// first: they have no wires behind them to crowd.
+						auto twoWay = [&](const std::map<int, float> &m) {
+							for (const auto &e : m) if (!oneWay(e.first)) return true;
+							return false;
+						};
+						bool forward = okF && (!okB || cost(fw) <= cost(bw) + EPS);
+						if (okF && okB && twoWay(fw) != twoWay(bw)) forward = !twoWay(fw);
+						for (const auto &e : forward ? fw : bw) shift(e.first, ax, forward ? e.second : -e.second);
+						any = true;
+					}
+			if (!any) break;
+		}
 	}
 
 	// No two gates overlap afterwards: push the lower one down.
@@ -997,9 +1164,31 @@ private:
 		return pinFaces(j, 0.0f, dy, L(i), B(i), R(i), T(i)) + pinFaces(i, 0.0f, 0.0f, L(j), B(j) + dy, R(j), T(j) + dy);
 	}
 
+	// Would every wire of `v`, moved by (dx, dy), leave both its ends forwards
+	// -- each pin ahead of the other, by PIN_CLEAR, along the way that one
+	// faces? Not so, the wire has to go out and turn back round one of them.
+	bool wiresFace(int v, float dx, float dy) const {
+		for (const LayoutPin &p : in.nodes[v].pins) {
+			if (p.net < 0) continue;
+			const float px = p.x + ox[v] + dx, py = p.y + oy[v] + dy;
+			for (const auto &qq : netPins.at(p.net)) {
+				if (qq.first == v) continue;
+				const LayoutPin &q = in.nodes[qq.first].pins[qq.second];
+				const float qx = q.x + ox[qq.first], qy = q.y + oy[qq.first];
+				if ((qx - px) * p.dx + (qy - py) * p.dy < PIN_CLEAR - EPS && (p.dx || p.dy)) return false;
+				if ((px - qx) * q.dx + (py - qy) * q.dy < PIN_CLEAR - EPS && (q.dx || q.dy)) return false;
+			}
+		}
+		return true;
+	}
+
 	// The nearest spot (within RESETTLE_REACH) where `v` overlaps nothing, no
 	// pin of its faces a part, and it covers no part's pin; false if none.
-	bool resettle(int v) {
+	// One where its wires also leave both ends forwards first (a keypad
+	// dropped on the adder it feeds goes back above it, not beside it with
+	// its wires coming in under the pins they feed), if there is one.
+	bool resettle(int v) { return resettle(v, true) || resettle(v, false); }
+	bool resettle(int v, bool facing) {
 		const int reach = (int)std::lround(RESETTLE_REACH / in.step);
 		for (int cost = 1; cost <= 2 * reach; cost++)
 			for (int ax = 0; ax <= cost && ax <= reach; ax++) {
@@ -1016,7 +1205,7 @@ private:
 							if (l < R(j) - EPS && L(j) < r - EPS && b < T(j) - EPS && B(j) < t - EPS) ok = false;
 							else if (pinFaces(j, 0.0f, 0.0f, l, b, r, t, RESETTLE_CLEAR) || pinFaces(v, dx, dy, L(j), B(j), R(j), T(j), RESETTLE_CLEAR)) ok = false;
 						}
-						if (!ok) continue;
+						if (!ok || (facing && !wiresFace(v, dx, dy))) continue;
 						ox[v] += dx; oy[v] += dy;
 						return true;
 					}
