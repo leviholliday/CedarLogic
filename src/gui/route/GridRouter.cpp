@@ -16,6 +16,7 @@ namespace route {
 namespace {
 
 const float EPS = 1e-3f;
+const float OWN_EPS = 0.05f;        // a pin this close to a footprint is on it
 
 // Prices, in grid steps of wire length. Tuned for looks: a crossing is worth a
 // long detour, a bend a short one, and lying on another wire's line (which
@@ -172,12 +173,14 @@ private:
 		int stub = -1;
 		int dir = NONE;
 		std::vector<int> walk;   // pin .. stub, the forced way out of the gate
+		bool jammed = false;     // a neighbor's body right across the way out
 	};
 	struct NetState {
 		std::set<long long> edges;
 		std::vector<int> nodesH, nodesV;
 		float cost = 0.0f;
 		bool ok = false;
+		bool relaxed = false;   // routed with gate bodies passable (at a price)
 	};
 
 	const GridInput &in;
@@ -228,9 +231,19 @@ private:
 	}
 
 	bool build();
-	void markPin(int k, const GridPin &p, PinInfo &info);
+	void markPin(int k, const GridPin &p, PinInfo &info, const std::vector<int> &netNodes, int self);
 	float moveCost(int k, int from, int arrived, int d, int to, bool goal, bool relaxed) const;
 	bool passable(int k, int n, bool relaxed) const;
+	// Detour repair (see unloop()): it searches with crossings cheaper, no
+	// history price, and the tree grown from each pin in turn.
+	float crossPrice = CROSS;
+	bool useHist = true;
+	int rootOverride = -1;         // grow the tree from this pin, not the net's root
+	std::vector<int> routeOrder;   // the order the passes route the nets in
+	void unloop();
+	float netLength(int k) const;
+	float pinTreeLength(int k) const;
+	int netCrossings(int k, int &onLine) const;
 	bool goalNode(int n) const { return inTree[n] && !channel[n]; }
 	void addToTree(int n);
 	void addTreeEdge(NetState &ns, int a, int b);
@@ -240,6 +253,20 @@ private:
 	bool routeNet(int k, bool relaxed);
 	void commit(int k, int sign);
 	RouteResult extract(int k, bool &ok) const;
+
+	// Polish: slide straight runs of a finished tree sideways (see polish()).
+	std::vector<int> eMark, nMark, nDeg;
+	std::vector<uint8_t> nFlags;
+	int pStamp = 0;
+	std::vector<long long> cand;
+	std::vector<int> candNodes, scratch, runTargets;
+	size_t polishWork = 0;
+	size_t workCap = 0;  // polishNet stops scoring once polishWork reaches this
+	int candCross = 0;   // crossings of the last candidate scored
+	void polish();
+	bool polishNet(int k, size_t allowance);
+	float scoreCandidate(int k, bool &valid);
+	void setNodes(NetState &ns);
 };
 
 bool Router::build() {
@@ -311,7 +338,12 @@ bool Router::build() {
 	pins.assign(in.nets.size(), {});
 	for (size_t k = 0; k < in.nets.size(); k++) {
 		pins[k].resize(in.nets[k].pins.size());
-		for (size_t i = 0; i < in.nets[k].pins.size(); i++) markPin((int)k, in.nets[k].pins[i], pins[k][i]);
+		std::vector<int> netNodes(in.nets[k].pins.size(), -1);   // where the net's pins sit
+		for (size_t i = 0; i < in.nets[k].pins.size(); i++) {
+			const int ix = findLine(xs, in.nets[k].pins[i].x), iy = findLine(ys, in.nets[k].pins[i].y);
+			if (ix >= 0 && iy >= 0) netNodes[i] = node(ix, iy);
+		}
+		for (size_t i = 0; i < in.nets[k].pins.size(); i++) markPin((int)k, in.nets[k].pins[i], pins[k][i], netNodes, (int)i);
 	}
 	// Pins nobody here routes: close the spot right outside the tip (a wire
 	// through it would look attached) and charge for brushing past.
@@ -335,7 +367,7 @@ bool Router::build() {
 	return true;
 }
 
-void Router::markPin(int k, const GridPin &p, PinInfo &info) {
+void Router::markPin(int k, const GridPin &p, PinInfo &info, const std::vector<int> &netNodes, int self) {
 	const int ix = findLine(xs, p.x), iy = findLine(ys, p.y);
 	if (ix < 0 || iy < 0) return;
 	info.node = node(ix, iy);
@@ -344,8 +376,39 @@ void Router::markPin(int k, const GridPin &p, PinInfo &info) {
 	info.walk.push_back(info.node);
 	if (info.dir != NONE) {
 		// Out through the gate body to the first open node, at least one step.
+		// Only through the pin's own gate, though: when the way out runs into a
+		// neighbor (a part pushed up against this one, its edge on the pin's
+		// line), walking on would bring the wire out on that part's far side,
+		// past the pin it was going to, and send it the long way round. The
+		// wire starts from that first step instead and finds its own way off
+		// the neighbor -- one step along its edge, usually. Unless the walk
+		// comes to another pin of the same wire on the way (gates stacked so
+		// one's enable pin points at the next one's): straight through is how
+		// that is drawn.
+		// (Its own gate is one the pin is on or in -- not one it merely touches
+		// from outside, the pin's tip on the edge the wire would go in by.)
+		std::vector<const GridRect *> own;
+		for (const GridRect &r : in.obstacles) {
+			if (!(p.x >= r.l - OWN_EPS && p.x <= r.r + OWN_EPS && p.y >= r.b - OWN_EPS && p.y <= r.t + OWN_EPS)) continue;
+			const bool entering = (info.dir == PX && std::fabs(p.x - r.l) < OWN_EPS) || (info.dir == NXD && std::fabs(p.x - r.r) < OWN_EPS) ||
+			                      (info.dir == PY && std::fabs(p.y - r.b) < OWN_EPS) || (info.dir == NYD && std::fabs(p.y - r.t) < OWN_EPS);
+			if (!entering) own.push_back(&r);
+		}
+		auto inOwn = [&](int m2) {
+			if (own.empty()) return true;   // a pin off every footprint: as before
+			const float x = xs[ixOf(m2)], y = ys[iyOf(m2)];
+			for (const GridRect *r : own)
+				if (x >= r->l - OWN_EPS && x <= r->r + OWN_EPS && y >= r->b - OWN_EPS && y <= r->t + OWN_EPS) return true;
+			return false;
+		};
+		bool meets = false;
+		for (int m2 = info.node; m2 >= 0 && (m2 == info.node || blocked[m2]) && !meets; m2 = stepFrom(m2, info.dir))
+			for (size_t j = 0; j < netNodes.size(); j++) if ((int)j != self && netNodes[j] == m2) meets = true;
 		int n = stepFrom(info.node, info.dir);
-		while (n >= 0 && blocked[n]) { info.walk.push_back(n); n = stepFrom(n, info.dir); }
+		while (n >= 0 && blocked[n]) {
+			if (!meets && !inOwn(n)) { info.jammed = true; break; }
+			info.walk.push_back(n); n = stepFrom(n, info.dir);
+		}
 		if (n >= 0) info.walk.push_back(n);
 		else { info.walk.resize(1); info.dir = NONE; }
 	}
@@ -378,7 +441,7 @@ float Router::moveCost(int k, int from, int arrived, int d, int to, bool goal, b
 	const int axisUse = h ? useH[to] : useV[to];
 	const int crossUse = h ? useV[to] : useH[to];
 	if (axisUse > 0) c += OVERLAP * axisUse;
-	else if (crossUse > 0) c += goal ? TOUCH : CROSS;
+	else if (crossUse > 0) c += goal ? TOUCH : crossPrice;
 	// Room beside the wire: others (and our own branches) one or two steps off.
 	const int ix = ixOf(to), iy = iyOf(to);
 	// (Two steps off is free at the normal spacing; skip looking it up.)
@@ -407,7 +470,7 @@ float Router::moveCost(int k, int from, int arrived, int d, int to, bool goal, b
 	if (hug[to]) c += HUG_GATE;
 	if (nearPin[to] != -1 && nearPin[to] != k) c += NEAR_PIN;
 	if (relaxed && blocked[to] && owner[to] == -1) c += RELAXED_WALL;
-	c += hist[to];
+	if (useHist) c += hist[to];
 	return c;
 }
 
@@ -536,7 +599,8 @@ bool Router::routeNet(int k, bool relaxed) {
 	const std::vector<PinInfo> &ps = pins[k];
 	const GridNet &net = in.nets[k];
 	if (ps.size() < 2) return false;
-	const int root = (net.root >= 0 && net.root < (int)ps.size()) ? net.root : 0;
+	const int root = rootOverride >= 0 && rootOverride < (int)ps.size() ? rootOverride
+	                 : (net.root >= 0 && net.root < (int)ps.size()) ? net.root : 0;
 	if (ps[root].node < 0) return false;
 	for (size_t j = 0; j + 1 < ps[root].walk.size(); j++) addTreeEdge(ns, ps[root].walk[j], ps[root].walk[j + 1]);
 	addToTree(ps[root].node);
@@ -568,9 +632,21 @@ bool Router::routeNet(int k, bool relaxed) {
 	ns.nodesH.assign(h.begin(), h.end());
 	ns.nodesV.assign(v.begin(), v.end());
 	ns.ok = true;
+	ns.relaxed = relaxed;
 	nets[k] = std::move(ns);
 	resetTree();
 	return true;
+}
+
+void Router::setNodes(NetState &ns) {
+	std::set<int> h, v;
+	for (long long e : ns.edges) {
+		const int a = (int)(e / 2);
+		if (e % 2 == 0) { h.insert(a); h.insert(a + 1); }
+		else { v.insert(a); v.insert(a + nx); }
+	}
+	ns.nodesH.assign(h.begin(), h.end());
+	ns.nodesV.assign(v.begin(), v.end());
 }
 
 void Router::commit(int k, int sign) {
@@ -647,11 +723,508 @@ RouteResult Router::extract(int k, bool &ok) const {
 	return out;
 }
 
+// Detours. Nets are routed fewest pins first, and each is grown one pin at a
+// time from its driver. Where wires are packed -- a column of tie points with
+// buses across it, as in a bit cell -- the small nets routed first take the
+// straight lanes, and the big net that joins the top of the column to the
+// bottom, routed last, finds every way through priced for crossings and for
+// running beside a neighbour: it goes right round the cell (a rectangle over
+// the top and down the side) where a person draws one line down the middle
+// crossing three wires. Routing it again on its own, even with crossings
+// cheap, can't help -- the lanes are taken.
+//
+// So after the passes, each net much longer than the shortest tree joining its
+// pins is routed again first: the nets lying in the box round its pins are
+// lifted, it is routed with crossings cheap and no history price, from
+// whichever of its pins gives the shortest tree, and the lifted nets go back
+// as they were where that leaves them clear, routed round it where not. The
+// new layout is kept when, both polished, the nets involved come out shorter
+// counting each crossing as CROSS_WORTH of wire, that net clearly shorter, and
+// no wire more on another's line. A second sweep looks again at nets that came
+// out the long way round from being moved aside.
+namespace {
+const float DETOUR_RATIO = 1.4f;     // routed length over the pins' tree length...
+const float DETOUR_MIN = 8.0f;       // ...and at least this much longer (world units)
+const float UNLOOP_CROSS = 5.0f;     // a crossing's price in the second try (steps)
+const float CROSS_WORTH = 4.0f;      // world units of wire a crossing is worth to the eye
+// Its share of the work, so the polish after it always gets its own: polish
+// work (see POLISH_WORK) and search steps, checked before each net it tries.
+// Each wire in a comparison, in the old layout and the new, is polished with
+// the same allowance, so neither is judged rougher than the other.
+const size_t UNLOOP_WORK = 3000000;
+const size_t UNLOOP_POPS = 600000;
+const size_t UNLOOP_NET_WORK = 150000;
+}
+
+float Router::netLength(int k) const {
+	float len = 0.0f;
+	for (long long e : nets[k].edges) {
+		const int a = (int)(e / 2), b = e % 2 ? a + nx : a + 1;
+		len += e % 2 ? ys[iyOf(b)] - ys[iyOf(a)] : xs[ixOf(b)] - xs[ixOf(a)];
+	}
+	return len;
+}
+
+// The pins joined by the shortest tree of straight-line (x plus y) hops: a
+// lower bound, near enough, for a wire that doesn't go out of its way.
+float Router::pinTreeLength(int k) const {
+	const std::vector<GridPin> &ps = in.nets[k].pins;
+	const size_t n = ps.size();
+	if (n < 2) return 0.0f;
+	std::vector<float> d(n, FLT_MAX);
+	std::vector<char> done(n, 0);
+	d[0] = 0.0f;
+	float total = 0.0f;
+	for (size_t it = 0; it < n; it++) {
+		size_t b = n;
+		for (size_t i = 0; i < n; i++) if (!done[i] && (b == n || d[i] < d[b])) b = i;
+		done[b] = 1; total += d[b];
+		for (size_t i = 0; i < n; i++)
+			if (!done[i]) d[i] = std::min(d[i], std::fabs(ps[i].x - ps[b].x) + std::fabs(ps[i].y - ps[b].y));
+	}
+	return total;
+}
+
+// Crossings of net k with everything committed (k itself uncommitted), and
+// in onLine the nodes where it lies on another wire's line or turns on one.
+int Router::netCrossings(int k, int &onLine) const {
+	const NetState &ns = nets[k];
+	int c = 0;
+	onLine = 0;
+	for (int n : ns.nodesH) {
+		const bool corner = std::binary_search(ns.nodesV.begin(), ns.nodesV.end(), n);
+		if (useH[n] > 0 || (corner && useV[n] > 0)) onLine++;
+		else if (useV[n] > 0 && !corner) c++;
+	}
+	for (int n : ns.nodesV) {
+		if (useV[n] > 0) onLine++;
+		else if (useH[n] > 0 && !std::binary_search(ns.nodesH.begin(), ns.nodesH.end(), n)) c++;
+	}
+	return c;
+}
+
+void Router::unloop() {
+	const size_t K = nets.size();
+	std::vector<char> tried(K, 0);
+	eMark.assign((size_t)N * 2, 0); nMark.assign(N, 0); nDeg.assign(N, 0); nFlags.assign(N, 0);
+	pStamp = 0;
+	const size_t work0 = polishWork, pops0 = popsUsed;
+	for (int sweep = 0; sweep < 2; sweep++) {
+		std::vector<std::pair<float, int>> worst;
+		for (size_t k = 0; k < K; k++) {
+			if (!nets[k].ok || nets[k].relaxed || tried[k]) continue;
+			const float len = netLength((int)k), bound = pinTreeLength((int)k);
+			if (len > bound * DETOUR_RATIO && len - bound > DETOUR_MIN) worst.push_back({ -(len - bound), (int)k });
+		}
+		std::sort(worst.begin(), worst.end());
+		for (const auto &w : worst) {
+			const int k = w.second;
+			tried[k] = 1;
+			if (popsUsed >= TOTAL_POPS || polishWork - work0 >= UNLOOP_WORK || popsUsed - pops0 >= UNLOOP_POPS) break;
+			if (!nets[k].ok) continue;
+			// The nets in the way: any lying in the box round k's pins.
+			float bx0 = FLT_MAX, bx1 = -FLT_MAX, by0 = FLT_MAX, by1 = -FLT_MAX;
+			for (const GridPin &p : in.nets[k].pins) { bx0 = std::min(bx0, p.x); bx1 = std::max(bx1, p.x); by0 = std::min(by0, p.y); by1 = std::max(by1, p.y); }
+			std::vector<int> group(1, k);
+			for (int j : routeOrder) {
+				if (j == k || !nets[j].ok || nets[j].relaxed) continue;
+				bool inside = false;
+				for (const std::vector<int> *v : { &nets[j].nodesH, &nets[j].nodesV })
+					for (size_t i = 0; i < v->size() && !inside; i++) {
+						const float x = xs[ixOf((*v)[i])], y = ys[iyOf((*v)[i])];
+						inside = x > bx0 && x < bx1 && y > by0 && y < by1;
+					}
+				if (inside) group.push_back(j);
+			}
+			// Length plus crossings, each crossing once (two nets of the group
+			// crossing each other count it half each).
+			auto score = [&](float &kLen, int &onLine) {
+				float sc = 0.0f;
+				onLine = 0;
+				std::vector<int> all(group.size());
+				for (size_t i = 0; i < group.size(); i++) {
+					const int j = group[i];
+					commit(j, -1);
+					int on = 0;
+					const float len = netLength(j);
+					all[i] = netCrossings(j, on);
+					sc += len;
+					onLine += on;
+					if (j == k) kLen = len;
+					commit(j, +1);
+				}
+				for (int j : group) commit(j, -1);
+				for (size_t i = 0; i < group.size(); i++) {
+					int on = 0;
+					const int outside = netCrossings(group[i], on);
+					sc += CROSS_WORTH * (outside + (all[i] - outside) * 0.5f);
+				}
+				for (int j : group) commit(j, +1);
+				return sc;
+			};
+			float len0 = 0.0f;
+			int on0 = 0, on1 = 0;
+			// Both ways judged polished, as they will be shown, every wire of
+			// the group with the same allowance each way.
+			for (int j : group) polishNet(j, UNLOOP_NET_WORK);
+			const float score0 = score(len0, on0);
+			std::vector<NetState> keep;
+			for (int j : group) { keep.push_back(nets[j]); commit(j, -1); }
+			// k first, with crossings cheap, from whichever pin gives the best tree.
+			crossPrice = UNLOOP_CROSS; useHist = false;
+			NetState bestK;
+			float bestKs = FLT_MAX;
+			const int P = (int)pins[k].size();
+			for (int r = 0; r < P && r < 8; r++) {
+				if (r > 0 && popsUsed - pops0 >= UNLOOP_POPS) break;   // out of steps: the best so far
+				rootOverride = r;
+				if (!routeNet(k, false)) continue;
+				int on = 0;
+				const float sc = netLength(k) + CROSS_WORTH * netCrossings(k, on) + 1000.0f * on;
+				if (sc < bestKs) { bestKs = sc; bestK = nets[k]; }
+			}
+			rootOverride = -1;
+			crossPrice = CROSS; useHist = true;
+			bool good = bestKs < FLT_MAX;
+			std::vector<int> placed;   // new routes committed so far
+			if (good) {
+				nets[k] = bestK;
+				commit(k, +1); placed.push_back(k);
+				// ...then the others: as they were where k's new shape leaves
+				// them clear, routed again round it where not.
+				std::vector<char> clear(group.size(), 0);
+				for (size_t i = 1; i < group.size(); i++) {
+					int on = 0, was = 0;
+					netCrossings(group[i], on);
+					commit(k, -1); netCrossings(group[i], was); commit(k, +1);
+					if (on <= was) { clear[i] = 1; commit(group[i], +1); placed.push_back(group[i]); }
+				}
+				for (size_t i = 1; i < group.size() && good; i++) {
+					if (clear[i]) continue;
+					if (popsUsed - pops0 >= UNLOOP_POPS + UNLOOP_POPS / 2) { good = false; break; }   // out of steps: keep the old
+					if (routeNet(group[i], false)) { commit(group[i], +1); placed.push_back(group[i]); }
+					else good = false;
+				}
+			}
+			float len1 = 0.0f, score1 = FLT_MAX;
+			if (good) for (int j : group) polishNet(j, UNLOOP_NET_WORK);
+			if (good) score1 = score(len1, on1);
+			const bool keepNew = good && on1 <= on0 && score1 < score0 - 1e-3f && len1 < len0 - DETOUR_MIN / 2;
+			if (!keepNew) {
+				for (int j : placed) commit(j, -1);
+				for (size_t i = 0; i < group.size(); i++) { nets[group[i]] = keep[i]; commit(group[i], +1); }
+			}
+		}
+	}
+}
+
+// Polish. The tree is grown one pin at a time, each connection the cheapest
+// way given the tree so far and the history price of contested nodes, so a
+// finished wire can keep a jog that once dodged something no longer there, a
+// branch taken off where the tree first reached, or a run pressed against a
+// part. Each wire in turn tries every straight run of its tree slid sideways
+// to each line within reach, its neighbours stretched or shortened to meet it
+// and anything left dangling cut off, and keeps the best that prices lower --
+// length, bends, crossings, crowding -- with the other wires where they are,
+// no history price and no steering to the middle. A slide that lines one jog
+// up with the next turns a staircase into one bend; one past another wire's
+// end takes a crossing out. Never through a part, onto another wire's line or
+// a pin's way out, and every pin stays on the tree.
+namespace {
+const int SLIDE_REACH = 30;              // grid steps either side
+const int SLIDE_SLACK = 4;               // ...and at most this far out of the tree's box
+// Work, in candidate edges scored (about 0.05 us each): the whole polish
+// after the detour repair, and at most this share of it for one wire, so a
+// big net (a clock across the page) can't take it all. The detour repair has
+// its own, smaller allowance (UNLOOP_WORK).
+const size_t POLISH_WORK = 6000000;
+const size_t POLISH_NET_WORK = 800000;
+const int POLISH_ROUNDS = 12;            // moves kept per wire per sweep
+const float POLISH_BAD = 1000.0f;        // on another wire's line, or a corner on it
+}
+
+float Router::scoreCandidate(int k, bool &valid) {
+	valid = false;
+	candNodes.clear();
+	auto touch = [&](int n) {
+		if (nMark[n] != pStamp) { nMark[n] = pStamp; nDeg[n] = 0; nFlags[n] = 0; candNodes.push_back(n); }
+		nDeg[n]++;
+	};
+	for (long long e : cand) {
+		if (eMark[e] != pStamp) continue;
+		const int a = (int)(e / 2), b = e % 2 ? a + nx : a + 1;
+		touch(a); touch(b);
+	}
+	const std::vector<PinInfo> &ps = pins[k];
+	auto isPin = [&](int n) { for (const PinInfo &p : ps) if (p.node == n) return true; return false; };
+	// Cut off what dangles.
+	std::vector<int> &leaves = scratch;
+	leaves.clear();
+	for (int n : candNodes) if (nDeg[n] == 1 && !isPin(n)) leaves.push_back(n);
+	while (!leaves.empty()) {
+		const int n = leaves.back(); leaves.pop_back();
+		if (nDeg[n] != 1) continue;
+		for (int d = 0; d < 4; d++) {
+			const int m = stepFrom(n, d);
+			if (m < 0) continue;
+			const long long e = edgeKey(n, m);
+			if (eMark[e] != pStamp) continue;
+			eMark[e] = 0;
+			nDeg[n]--; nDeg[m]--;
+			if (nDeg[m] == 1 && !isPin(m)) leaves.push_back(m);
+			break;
+		}
+	}
+	int liveE = 0, liveN = 0;
+	float c = 0.0f;
+	candCross = 0;
+	for (long long e : cand) {
+		if (eMark[e] != pStamp) continue;
+		liveE++;
+		const int a = (int)(e / 2);
+		const bool h = e % 2 == 0;
+		const int b = h ? a + 1 : a + nx;
+		nFlags[a] |= h ? 1 : 2; nFlags[b] |= h ? 1 : 2;
+		c += (h ? xs[ixOf(b)] - xs[ixOf(a)] : ys[iyOf(b)] - ys[iyOf(a)]) / in.step;
+	}
+	polishWork += cand.size();
+	for (int n : candNodes) if (nDeg[n] > 0) liveN++;
+	if (liveE != liveN - 1) return 0.0f;   // a loop
+	for (const PinInfo &p : ps) {
+		if (p.node < 0 || nMark[p.node] != pStamp || nDeg[p.node] == 0) return 0.0f;
+		for (size_t j = 0; j + 1 < p.walk.size(); j++)
+			if (eMark[edgeKey(p.walk[j], p.walk[j + 1])] != pStamp) return 0.0f;
+	}
+	// One piece?
+	{
+		std::vector<int> &stack = scratch;
+		stack.assign(1, ps[0].node);
+		int seen = 0;
+		nFlags[ps[0].node] |= 4;
+		while (!stack.empty()) {
+			const int n = stack.back(); stack.pop_back();
+			seen++;
+			for (int d = 0; d < 4; d++) {
+				const int m = stepFrom(n, d);
+				if (m < 0 || eMark[edgeKey(n, m)] != pStamp || (nFlags[m] & 4)) continue;
+				nFlags[m] |= 4;
+				stack.push_back(m);
+			}
+		}
+		for (int n : candNodes) nFlags[n] &= 3;
+		if (seen != liveN) return 0.0f;
+	}
+	for (int n : candNodes) {
+		if (nDeg[n] == 0) continue;
+		const uint8_t f = nFlags[n];
+		if (owner[n] == k) {
+			if (channel[n] && (f == 3 || nDeg[n] > 2)) return 0.0f;   // into a pin's way out
+		} else if (!passable(k, n, false)) return 0.0f;
+		const int oh = useH[n], ov = useV[n];
+		if (((f & 1) && oh > 0) || ((f & 2) && ov > 0) || (f == 3 && oh + ov > 0)) c += POLISH_BAD;
+		else if ((f == 1 && ov > 0) || (f == 2 && oh > 0)) { c += CROSS; candCross++; }
+		if (f == 3 && nDeg[n] == 2) c += BEND;
+		const int ix = ixOf(n), iy = iyOf(n);
+		for (int sgn = -1; sgn <= 1; sgn += 2) {
+			if (f & 1) {
+				const int j = iy + sgn;
+				if (j >= 0 && j < ny) {
+					const int m = node(ix, j);
+					if (useH[m] > 0 || (nMark[m] == pStamp && nDeg[m] > 0 && (nFlags[m] & 1))) c += PARALLEL_NEAR;
+				}
+			}
+			if (f & 2) {
+				const int j = ix + sgn;
+				if (j >= 0 && j < nx) {
+					const int m = node(j, iy);
+					if (useV[m] > 0 || (nMark[m] == pStamp && nDeg[m] > 0 && (nFlags[m] & 2))) c += PARALLEL_NEAR;
+				}
+			}
+		}
+		if (hug[n]) c += HUG_GATE;
+		if (nearPin[n] != -1 && nearPin[n] != k) c += NEAR_PIN;
+	}
+	valid = true;
+	return c;
+}
+
+bool Router::polishNet(int k, size_t allowance) {
+	NetState &ns = nets[k];
+	if (!ns.ok || ns.relaxed || pins[k].size() < 2) return false;
+	for (const PinInfo &p : pins[k]) if (p.node < 0) return false;
+	if (allowance == 0) return false;
+	workCap = polishWork + allowance;
+	commit(k, -1);
+	std::vector<long long> E(ns.edges.begin(), ns.edges.end());
+	auto load = [&](const std::vector<long long> &v) {
+		if (++pStamp == 0x7fffffff) { std::fill(eMark.begin(), eMark.end(), 0); std::fill(nMark.begin(), nMark.end(), 0); pStamp = 1; }
+		cand.clear();
+		for (long long e : v) { eMark[e] = pStamp; cand.push_back(e); }
+	};
+	auto add = [&](long long e) { if (eMark[e] != pStamp) { eMark[e] = pStamp; cand.push_back(e); } };
+	load(E);
+	bool valid = false;
+	float base = scoreCandidate(k, valid);
+	int baseCross = candCross;
+	bool changed = false;
+	if (valid) {
+		std::vector<long long> bestE;
+		std::vector<char> inE;
+		for (int round = 0; round < POLISH_ROUNDS && polishWork < workCap; round++) {
+			// Maximal straight runs: (axis, line, from, to), node indices.
+			struct Run { bool h; int line, a, b; };
+			std::vector<Run> runs;
+			std::vector<std::pair<int, int>> hE, vE;
+			for (long long e : E) {
+				const int a = (int)(e / 2);
+				if (e % 2 == 0) hE.push_back({ iyOf(a), ixOf(a) }); else vE.push_back({ ixOf(a), iyOf(a) });
+			}
+			std::sort(hE.begin(), hE.end()); std::sort(vE.begin(), vE.end());
+			for (int pass = 0; pass < 2; pass++) {
+				const auto &L = pass == 0 ? hE : vE;
+				for (size_t i = 0; i < L.size();) {
+					size_t j = i;
+					while (j + 1 < L.size() && L[j + 1].first == L[i].first && L[j + 1].second == L[j].second + 1) j++;
+					runs.push_back({ pass == 0, L[i].first, L[i].second, L[j].second + 1 });
+					i = j + 1;
+				}
+			}
+			std::set<long long> Eset(E.begin(), E.end());
+			// A run slides within the tree's own box, give or take a few
+			// steps: past that it only gets longer.
+			int bx0 = nx, bx1 = 0, by0 = ny, by1 = 0;
+			for (long long e : E) {
+				const int a = (int)(e / 2), b = e % 2 ? a + nx : a + 1;
+				bx0 = std::min(bx0, ixOf(a)); bx1 = std::max(bx1, ixOf(b));
+				by0 = std::min(by0, iyOf(a)); by1 = std::max(by1, iyOf(b));
+			}
+			auto at = [&](const Run &r, int along, int line) { return r.h ? node(along, line) : node(line, along); };
+			float best = base - 1e-3f;
+			int bestCross = baseCross;
+			bestE.clear();
+			for (const Run &r : runs) {
+				if (polishWork >= workCap) break;
+				// Where the rest of the tree meets the run: those nodes get a
+				// connector across to the slid run.
+				std::vector<int> attach;
+				for (int i = r.a; i <= r.b; i++) {
+					const int n = at(r, i, r.line);
+					bool att = false;
+					for (const PinInfo &p : pins[k]) if (p.node == n) att = true;
+					for (int d = 0; d < 4 && !att; d++) {
+						if (horizontalDir(d) == r.h) continue;
+						const int m = stepFrom(n, d);
+						if (m >= 0 && Eset.count(edgeKey(n, m))) att = true;
+					}
+					if (att) attach.push_back(i);
+				}
+				const int lines = r.h ? ny : nx;
+				// Lines worth trying: a step or two off (out of a part's way or
+				// a neighbour's), and the lines where a slide can end a jog --
+				// the far ends of the runs meeting this one, the other runs
+				// lying the same way, the pins.
+				std::vector<int> &targets = runTargets;
+				targets.clear();
+				for (const Run &r2 : runs) if (r2.h == r.h && r2.line != r.line) targets.push_back(r2.line);
+				for (const PinInfo &p : pins[k]) targets.push_back(r.h ? iyOf(p.node) : ixOf(p.node));
+				// ...and the lines that take a crossing out: just short of a wire
+				// crossing a run that meets this one, just past the end of one
+				// crossing this run.
+				auto lineOf = [&](int n) { return r.h ? iyOf(n) : ixOf(n); };
+				for (int i : attach)
+					for (int d = 0; d < 4; d++) {
+						if (horizontalDir(d) == r.h) continue;
+						int n = at(r, i, r.line);
+						for (int m = stepFrom(n, d); m >= 0 && Eset.count(edgeKey(n, m)); m = stepFrom(n, d)) {
+							n = m;
+							if ((r.h ? useH[n] : useV[n]) > 0) targets.push_back(lineOf(n) + (d == PY || d == PX ? -1 : 1));
+						}
+						targets.push_back(lineOf(n));
+					}
+				for (int i = r.a; i <= r.b; i++) {
+					const int n0 = at(r, i, r.line);
+					if ((r.h ? useV[n0] : useH[n0]) == 0) continue;
+					for (int d = 0; d < 4; d++) {
+						if (horizontalDir(d) == r.h) continue;
+						int n = n0, steps = 0;
+						while (n >= 0 && (r.h ? useV[n] : useH[n]) > 0 && steps++ <= SLIDE_REACH) n = stepFrom(n, d);
+						if (n >= 0) targets.push_back(lineOf(n));
+					}
+				}
+				auto worth = [&](int line) {
+					if (std::abs(line - r.line) <= 2) return true;
+					for (int x : targets) if (x == line) return true;
+					return false;
+				};
+				for (int sgn = -1; sgn <= 1; sgn += 2) {
+					for (int t = 1; t <= SLIDE_REACH && polishWork < workCap; t++) {
+						const int line = r.line + sgn * t;
+						if (line < 0 || line >= lines) break;
+						if (r.h ? (line < by0 - SLIDE_SLACK || line > by1 + SLIDE_SLACK) : (line < bx0 - SLIDE_SLACK || line > bx1 + SLIDE_SLACK)) break;
+						bool wall = false, onLine = false;
+						for (int i = r.a; i <= r.b && !wall; i++) {
+							const int n = at(r, i, line);
+							if (owner[n] != k && !passable(k, n, false)) wall = true;
+							else if ((r.h ? useH[n] : useV[n]) > 0) onLine = true;
+						}
+						if (wall) break;
+						if (onLine || !worth(line)) continue;
+						// Connectors through a part or along another wire: no.
+						bool blockedWay = false;
+						for (size_t ai = 0; ai < attach.size() && !blockedWay; ai++)
+							for (int q = 1; q <= t && !blockedWay; q++) {
+								const int n = at(r, attach[ai], r.line + sgn * q);
+								if ((owner[n] != k && !passable(k, n, false)) || (r.h ? useV[n] : useH[n]) > 0) blockedWay = true;
+							}
+						if (blockedWay) continue;
+						load(E);
+						for (int i = r.a; i < r.b; i++) eMark[edgeKey(at(r, i, r.line), at(r, i + 1, r.line))] = 0;
+						for (int i = r.a; i < r.b; i++) add(edgeKey(at(r, i, line), at(r, i + 1, line)));
+						for (int i : attach)
+							for (int q = 0; q < t; q++) add(edgeKey(at(r, i, r.line + sgn * q), at(r, i, r.line + sgn * (q + 1))));
+						bool ok = false;
+						const float sc = scoreCandidate(k, ok);
+						// Never a crossing more, whatever it saves in length or bends.
+						if (ok && sc < best && candCross <= baseCross) {
+							best = sc; bestCross = candCross;
+							bestE.clear();
+							for (long long e : cand) if (eMark[e] == pStamp) bestE.push_back(e);
+						}
+					}
+				}
+			}
+			if (bestE.empty()) break;
+			std::sort(bestE.begin(), bestE.end());
+			E = bestE; base = best; baseCross = bestCross; changed = true;
+		}
+	}
+	if (changed) {
+		ns.edges = std::set<long long>(E.begin(), E.end());
+		setNodes(ns);
+	}
+	commit(k, +1);
+	return changed;
+}
+
+void Router::polish() {
+	eMark.assign((size_t)N * 2, 0); nMark.assign(N, 0); nDeg.assign(N, 0); nFlags.assign(N, 0);
+	pStamp = 0;
+	// Two sweeps: the second only for the wires that moved in the first (the
+	// ones that stayed rarely gain from their neighbours' moves).
+	std::vector<char> moved(nets.size(), 0);
+	const size_t end = polishWork + POLISH_WORK;
+	auto left = [&] { return std::min(POLISH_NET_WORK, end - std::min(end, polishWork)); };
+	for (size_t k = 0; k < nets.size() && polishWork < end; k++) moved[k] = polishNet((int)k, left()) ? 1 : 0;
+	for (size_t k = 0; k < nets.size() && polishWork < end; k++) if (moved[k]) polishNet((int)k, left());
+}
+
 GridOutput Router::run() {
 	GridOutput out;
 	const size_t K = in.nets.size();
 	out.ok.assign(K, false);
 	out.routes.assign(K, RouteResult());
+	out.jammed.assign(K, false);
+	out.forced.assign(K, false);
 	if (K == 0 || !build()) return out;
 	nets.assign(K, NetState());
 
@@ -669,6 +1242,7 @@ GridOutput Router::run() {
 		return span[a] < span[b];
 	});
 
+	routeOrder = order;
 	std::vector<NetState> best;
 	int bestOverlaps = 0x7fffffff, sinceBetter = 0;
 	float bestCost = FLT_MAX, lastCost = FLT_MAX;
@@ -714,6 +1288,14 @@ GridOutput Router::run() {
 		}
 	}
 	nets = best;
+	useH = fixedH; useV = fixedV;
+	for (size_t k = 0; k < K; k++) if (nets[k].ok) commit((int)k, +1);
+	unloop();
+	polish();
+	for (size_t k = 0; k < K; k++) {
+		for (const PinInfo &pi : pins[k]) if (pi.jammed) out.jammed[k] = true;
+		out.forced[k] = nets[k].ok && nets[k].relaxed;
+	}
 	out.overlaps = bestOverlaps == 0x7fffffff ? 0 : bestOverlaps;
 	for (size_t k = 0; k < K; k++) {
 		if (!nets[k].ok) continue;

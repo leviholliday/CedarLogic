@@ -18,6 +18,16 @@
 //     early nets move aside for later ones instead of the order deciding. On
 //     a big page, where a full pass is costly, later passes reroute only the
 //     nets still sharing a line, and stop once that stops helping;
+//   * a net that still comes out much longer than the shortest tree joining
+//     its pins (walled in by nets routed before it, it went round a block) is
+//     routed again first, crossings cheap, the nets in its way put back round
+//     it, and kept when the lot come out shorter, counting a crossing as a
+//     few units of wire;
+//   * finished wires are then polished: each straight run of a tree is tried
+//     slid sideways to the lines where that ends a jog or a crossing, and kept
+//     there when the wire comes out shorter, with fewer bends or less crowded
+//     -- never with a crossing more (staircases become one bend, a branch
+//     comes off where it is needed);
 //   * the work is capped in search steps, not seconds (Tidy Up runs on the UI
 //     thread, and the result mustn't depend on the machine): a wire past the
 //     cap is left to the caller's plain route;
@@ -76,6 +86,14 @@ struct GridOutput {
 	// caller had; routes[i] is empty then.
 	std::vector<bool> ok;
 	std::vector<RouteResult> routes;
+	// Per net: true when another gate's body sits right across the way out of
+	// one of its pins (parts jammed together); its route starts with a step
+	// along or into that body.
+	std::vector<bool> jammed;
+	// Per net: true when it only routed with gate bodies passable -- the route
+	// may run through one. The caller may prefer the shape the wire was drawn
+	// with.
+	std::vector<bool> forced;
 	// Nodes two routed wires still share on the same line (0 when clean).
 	int overlaps = 0;
 };

@@ -511,7 +511,7 @@ int runCase(CLDocument* doc, int page, const std::string& out, const std::string
 	if (mb.parts <= 220) {
 		if (CLDocument* t = cl_document_open_text(beforeText.c_str(), (long)beforeText.size(), err, sizeof err)) {
 			const auto t1 = std::chrono::steady_clock::now();
-			cl_edit_tidy_begin(t, page, 0);
+			cl_edit_tidy_begin(t, page, getenv("CL_LAB_TIDY_MODE") ? atoi(getenv("CL_LAB_TIDY_MODE")) : 0);   // 1 = Full rearrange
 			cl_edit_tidy_end(t, true);
 			const double ts = std::chrono::duration<double>(std::chrono::steady_clock::now() - t1).count();
 			const Metrics mt = measure(t->page(page));

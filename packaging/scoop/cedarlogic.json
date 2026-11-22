@@ -1,5 +1,5 @@
 {
-    "version": "0.4.1",
+    "version": "4.1",
     "description": "Free, open-source digital logic simulator: build logic gate circuits, run them live, and check them with truth tables and Karnaugh maps.",
     "homepage": "https://cedarlogic.netlify.app/",
     "license": "GPL-3.0-only",
@@ -9,12 +9,12 @@
     ],
     "architecture": {
         "64bit": {
-            "url": "https://github.com/leviholliday/CedarLogic-Releases/releases/download/v0.4.1/CedarLogic-0.4.1-Windows-x64.zip",
-            "hash": "4c2be6d41ee074f90d4e4dab269f5da618766aa85312604499937ed969ef94c0"
+            "url": "https://github.com/leviholliday/CedarLogic-Releases/releases/download/v4.1/CedarLogic-4.1-Windows-x64.zip",
+            "hash": "3ef1e31e2060aaa4879040e03fac198658b666471c9166725754d0376148efeb"
         },
         "arm64": {
-            "url": "https://github.com/leviholliday/CedarLogic-Releases/releases/download/v0.4.1/CedarLogic-0.4.1-Windows-ARM64.zip",
-            "hash": "8b64051725ac529e6a8e27d0cf202ea3aafa04a8d892442b2968184eea7e971a"
+            "url": "https://github.com/leviholliday/CedarLogic-Releases/releases/download/v4.1/CedarLogic-4.1-Windows-ARM64.zip",
+            "hash": "9fdf22b6ecce1c11facdbbf3594293d0f8929ff91f6b2e16cd264c9faa3bcbce"
         }
     },
     "extract_dir": "CedarLogic",
